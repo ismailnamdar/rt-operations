@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {cutOffProduction,upcomingIntake} from '../app/production-cutoff.mjs';
+test('manual cutoff freezes intake; late redos and approvals enter the following window',()=>{
+ const s={snapshot:{productionRuns:{runs:[{id:'pro1',orders:[]},{id:'pro2',orders:[]}]}},events:[],redoRequests:[],productionApprovals:[]},owner={id:'owner',role:'owner'};
+ cutOffProduction(s,owner,{runId:'pro1'},'2026-10-13T17:00:00Z');s.productionApprovals=[{id:'a',verified:true,approvedAt:'2026-10-13T18:00:00Z'},{id:'b',verified:true,approvedAt:'2026-10-13T20:01:00Z'},{id:'unverified',approvedAt:'2026-10-13T18:00:00Z'}];s.redoRequests=[{id:'r1',status:'queued',requestedAt:'2026-10-13T20:00:00Z'},{id:'r2',status:'queued',requestedAt:'2026-10-13T20:01:00Z'}];
+ const closed=cutOffProduction(s,owner,{runId:'pro2'},'2026-10-13T20:00:00Z');assert.deepEqual(closed.approvalIds,['a']);assert.deepEqual(closed.redoIds,['r1']);assert.deepEqual(upcomingIntake(s,'2026-10-13T21:00:00Z').redos.map(r=>r.id),['r2']);assert.deepEqual(upcomingIntake(s,'2026-10-13T21:00:00Z').approvals.map(r=>r.id),['b']);assert.equal(cutOffProduction(s,owner,{runId:'pro2'},'2026-10-14T00:00:00Z').cutoffAt,closed.cutoffAt);assert.throws(()=>cutOffProduction(s,{role:'warehouse'},{runId:'pro1'}),/role/);
+});

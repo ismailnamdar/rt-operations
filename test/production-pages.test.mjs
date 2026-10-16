@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {productionPages,orderBooked} from '../app/public/production-pages.js';
+const orders=[{order:'1'},{order:'2'},{order:'3',fulfilled:true}],shipment=(order,booking)=>({approved:{orders:[order]},booking});
+test('mixed run keeps unbooked unfulfilled in main and all orders in All',()=>{const p=productionPages(orders,{intents:[shipment('1',{id:'label'}),shipment('2',null)]});assert.equal(p.mixed,true);assert.deepEqual(p.pending.map(o=>o.order),['2']);assert.equal(p.all.length,3);});
+test('none booked and all booked have only one page; partially booked order remains pending',()=>{assert.equal(productionPages(orders,{}).mixed,false);assert.equal(productionPages(orders,{intents:orders.map(o=>shipment(o.order,{}))}).mixed,false);assert.equal(orderBooked({order:'1'},{intents:[shipment('1',{}),shipment('1',null)]}),false);});

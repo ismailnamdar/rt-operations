@@ -1,0 +1,15 @@
+.git
+.private
+.env
+.env.*
+!.env.example
+data
+node_modules
+test
+outputs
+*.png
+*.zip
+work
+print-station
+deploy
+Launch*

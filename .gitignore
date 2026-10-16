@@ -1,0 +1,10 @@
+.env
+data/
+node_modules/
+*.log
+.private/
+dist/
+.vercel/
+*.zip
+.env.*
+!.env.example

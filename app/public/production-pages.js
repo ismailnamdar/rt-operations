@@ -1,0 +1,2 @@
+export function orderBooked(order,data){if(order.upcomingRedo)return false;const shipments=(data?.intents||[]).filter(i=>i.approved.orders.some(n=>String(n)===order.order));return shipments.length>0&&shipments.every(i=>!!i.booking);}
+export function productionPages(orders,data){const pending=orders.filter(o=>!o.fulfilled&&!orderBooked(o,data)),booked=orders.filter(o=>orderBooked(o,data));return {pending,all:orders,mixed:pending.length>0&&booked.length>0};}

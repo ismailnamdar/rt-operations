@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {orderStatus} from '../app/public/order-detail.js';import {setOrderStage} from '../app/production-stages.mjs';
+test('order stage never advances from booking, printing or Shopify fulfillment alone',()=>{
+ const order={order:'100',productionStage:'packing',fulfilled:true};assert.equal(orderStatus(order,{intents:[{booking:{},labelAppliedAt:'now'}],printJobs:[{status:'spooled'}]}),'Cutting / stitching / packing');assert.equal(orderStatus({order:'101'},{}),'Stage not recorded');assert.equal(orderStatus(order,{orderStages:{100:{stage:'in transit'}}}),'In transit');
+});
+test('production team updates manufacturing stages but cannot declare delivery',()=>{const s={intents:[{approved:{orders:['100']}}],events:[]},team={id:'team',role:'warehouse'};setOrderStage(s,team,{order:'100',stage:'cutting / stitching / packing'});assert.equal(s.orderStages['100'].stage,'cutting / stitching / packing');assert.throws(()=>setOrderStage(s,team,{order:'100',stage:'delivered'}),/owner or verified/);assert.throws(()=>setOrderStage(s,team,{order:'100',stage:'invented'}),/Unknown/);});
