@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-export const blank = () => ({version:1,revision:0,users:[],sessions:[],intents:[],printJobs:[],jobs:[],events:[],settings:{autoPrintUPS:true,autoPrintFedEx:true},snapshot:{results:{review:[],questions:[],gallery:[],history:[],alerts:[],updatedAt:new Date().toISOString(),sourceLabel:'Hosted migration — no live accounts connected'},runs:[],pipeline:{orders:[]},unfulfilled:{orders:[],inventoryComplete:false},schedule:{days:[],version:'initial'},expedited:{orders:[]},mockupBatches:{batches:[]},emailTemplates:[],lukasTodos:[]}});
+export const blank = () => ({version:1,revision:0,users:[],sessions:[],intents:[],printJobs:[],jobs:[],events:[],settings:{upcomingProductionRunId:'1nOvYd0k_GgVfUcRVckBpMG1NvHVTiqgC',autoPrintUPS:true,autoPrintFedEx:true},snapshot:{results:{review:[],questions:[],gallery:[],history:[],alerts:[],updatedAt:new Date().toISOString(),sourceLabel:'Hosted migration — no live accounts connected'},runs:[],pipeline:{orders:[]},unfulfilled:{orders:[],inventoryComplete:false},schedule:{days:[],version:'initial'},expedited:{orders:[]},mockupBatches:{batches:[]},emailTemplates:[],lukasTodos:[]}});
 export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/state.json',databaseUrl=process.env.DATABASE_URL,schema=null}={}) {
   if(databaseUrl){
     const {Pool}=await import('pg');const pool=new Pool({connectionString:databaseUrl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000});

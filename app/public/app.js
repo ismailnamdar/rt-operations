@@ -1,13 +1,5 @@
-import {renderModernOrders,showSimulation} from './orders-modern.js';
-import {expeditedUrgency} from './expedited-urgency.js';
-let productionRenderer,productionLoading;
-function renderProduction(s,api,refresh,toast){
- const host=document.querySelector('#production-shipping-content');if(!host)return;
- if(!s.productionShipping){host.textContent='Label Booker is awaiting a safe server restart. Existing agents will not be interrupted; uploads remain disabled.';return}
- if(productionRenderer){productionRenderer(s,api,refresh,toast);return}
- host.textContent='Loading Label Booker…';
- if(!productionLoading)productionLoading=import('./production-ui.js').then(m=>{productionRenderer=m.renderProduction;host.replaceChildren();if(activeView()==='shipping')requestRender()}).catch(error=>{host.textContent='Label Booker could not load. Refresh after the server is updated.';productionLoading=null;toast(error.message)});
-}
+import {renderControlCenter} from './control-center.js';
+import {renderProduction as renderProductionPage} from './production-ui.js';
 import {renderMockupBatches} from './mockup-batches-ui.js';
 const expandedRunChecklists=new Set();
 const deletedRunHistoryKey='shuttle-deleted-error-runs-v1';
@@ -41,17 +33,17 @@ const emailSavesInFlight=new Set();
 const deletionsInFlight=new Set(),deletionIntentKeys=new Map();
 function canSelectReview(item){return !deletionsInFlight.has(item.id)&&!emailSavesInFlight.has(item.id)&&!approvalReserved(item.id)&&!reviewInputReserved(item.id)}
 function canSaveEmail(item){return canSubmitApproval()&&!emailSavesInFlight.has(item.id)&&!approvalReserved(item.id)&&!reviewInputReserved(item.id)}
-const names={mockups:'Mock-ups',home:'Home',agents:'Agents & History',review:'Review queue',oldest:'Orders',calendar:'Production',shipping:'Label Booker',expedited:'Expedited orders',questions:'Policy questions',history:'Run history'};
+const names={mockups:'Mock-ups',home:'Home',agents:'Agents & History',review:'Review queue',oldest:'Orders',calendar:'Production',expedited:'Expedited orders',questions:'Policy questions',history:'Run history'};
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.addEventListener('click',fn);return b}
 function toast(message){if($('#detail-dialog').open){let note=$('#dialog-feedback');if(!note){note=el('div','dialog-feedback');note.id='dialog-feedback';note.setAttribute('role','status');($('#dialog-actions').hidden?$('#dialog-content'):$('#dialog-actions')).prepend(note)}note.textContent=message;}$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,6500)}
-function route(){let view=location.hash.slice(1)||'home';if(view==='gallery'){view='calendar';history.replaceState(null,'','#calendar')}if(!names[view])view='home';for(const v of $$('.view'))v.hidden=v.id!=='view-'+view;for(const a of $$('[data-nav]')){a.classList.toggle('active',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'shipping'}[view]||view));a.setAttribute('aria-current',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'shipping'}[view]||view)?'page':'false')}$('#breadcrumb-current').textContent=names[view];if(state)requestRender()}
+function route(){let view=location.hash.slice(1)||'home';if(view==='shipping'){view='calendar';history.replaceState(null,'','#calendar')}if(view==='gallery'){view='calendar';history.replaceState(null,'','#calendar')}if(!names[view])view='home';for(const v of $$('.view'))v.hidden=v.id!=='view-'+view;for(const a of $$('[data-nav]')){a.classList.toggle('active',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'calendar'}[view]||view));a.setAttribute('aria-current',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'calendar'}[view]||view)?'page':'false')}$('#breadcrumb-current').textContent=names[view];if(state)requestRender()}
 async function api(path,body){const res=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Shuttle-Token':csrf}:{},body:body?JSON.stringify(body):undefined});const data=await res.json();if(!res.ok)throw Error(data.error||'Request failed');return data}
 function pending(){return (state?.results.review||[]).filter(x=>x.status==='pending'&&!deletionsInFlight.has(x.id)&&!approvalReserved(x.id)&&!reviewInputReserved(x.id))}
 function render(){if(!state)return;if(state.expedited?.orders)state.expedited={...state.expedited,orders:state.expedited.orders.filter(row=>!(String(row.fulfillmentStatus||'').toUpperCase()==='FULFILLED'||(row.expeditedWithdrawal?.verified===true&&Boolean(row.expeditedWithdrawal?.messageId))))};deferredRender=false;const r=state.results;const active=state.runs.find(x=>['queued','running','dispatching'].includes(x.status));const latestWorkflow=visibleHistoryRuns().find(x=>['banda','complete','scan'].includes(x.mode));const blocked=!active&&latestWorkflow&&['needs_attention','failed','interrupted'].includes(latestWorkflow.status)?latestWorkflow:null;const online=state.connection.ready;$('#connection-label').textContent=!online?'Connection unavailable':active?'Agent running':blocked?'Last run needs attention':'Ready to run';$('#connection-dot').classList.toggle('offline',!online||!!blocked);$('#footer-status').textContent=r.sourceLabel||'Updated '+new Date(r.updatedAt).toLocaleString();$('#review-count').textContent=pending().length;$('#question-count').textContent=r.questions.filter(x=>x.status==='pending').length;$('#oldest-count').textContent=unfulfilledRows().length;$('#expedited-count').textContent=(state.expedited?.orders||[]).length;$('#mockup-batches-count').textContent=(state.mockupBatches?.batches||[]).flatMap(b=>b.items||[]).filter(i=>!['sent','excluded'].includes(i.status)).length;
 for(const b of $$('.run-button'))b.disabled=busy||!online;
-const banner=$('#run-banner');banner.hidden=!active&&!blocked&&online&&!state.connection.limitation;banner.classList.toggle('warn',!online||!!blocked);banner.replaceChildren();if(active){banner.append(el('strong','',active.title+' · '+active.status),el('span','',active.progress||'Waiting for the agent. Results will appear here.'))}else if(blocked){banner.append(el('strong','',blocked.title+' · Needs attention'),el('span','',blocked.summary||blocked.progress||'The last run did not finish. Check its history before retrying.'));const historyLink=el('a','secondary','View run history →');historyLink.href='#history';banner.append(historyLink);if(!online)banner.append(el('span','',state.connection.message));}else if(!online){banner.append(el('strong','','Run connection needs attention'),el('span','',state.connection.message));/* Hosted deployments do not start local Codex workers. */}else if(state.connection.limitation){banner.append(el('strong','','Local workers enabled'),el('span','',state.connection.limitation))}
-const view=activeView();if(view==='shipping')renderProduction(state,api,refresh,toast);if(view==='home'){renderHome();renderCalendar();}if(view==='mockups')renderMockupBatches(state,api,refresh,toast);if(view==='review')renderReview();if(view==='calendar'){renderProductionArchive();import('./production-ui.js').then(m=>m.renderProduction(state,api,refresh,toast,'#production-run-content'));}if(view==='expedited')renderExpedited();if(view==='questions')renderQuestions();if(view==='history')renderHistory();if(view==='oldest')renderPipeline();renderReceipt();renderLiveRuntime();lastContentVersion=contentVersion(state);lastRunVersion=JSON.stringify(state.runs);}
+const banner=$('#run-banner');banner.hidden=!active&&!blocked&&online&&!state.connection.limitation;banner.classList.toggle('warn',!online||!!blocked);banner.replaceChildren();if(active){banner.append(el('strong','',active.title+' · '+active.status),el('span','',active.progress||'Waiting for the agent. Results will appear here.'))}else if(blocked){banner.append(el('strong','',blocked.title+' · Needs attention'),el('span','',blocked.summary||blocked.progress||'The last run did not finish. Check its history before retrying.'));const historyLink=el('a','secondary','View run history →');historyLink.href='#history';banner.append(historyLink);if(!online)banner.append(el('span','',state.connection.message));}else if(!online){banner.append(el('strong','','Run connection needs attention'),el('span','',state.connection.message));banner.append(button('Use local Codex workers','secondary',()=>action('/api/setup',{backend:'cli'},'Local workers enabled. Choose an agent to run.')))}else if(state.connection.limitation){banner.append(el('strong','','Local workers enabled'),el('span','',state.connection.limitation))}
+renderControlCenter(state,api,refresh,toast);const view=activeView();if(view==='home')renderHome();if(view==='mockups')renderMockupBatches(state,api,refresh,toast);if(view==='review')renderReview();if(view==='calendar'){renderCalendar();renderProductionPage(state,api,refresh,toast,'#production-run-content');}if(view==='expedited')renderExpedited();if(view==='questions')renderQuestions();if(view==='history')renderHistory();if(view==='oldest')renderPipeline();renderReceipt();renderLiveRuntime();lastContentVersion=contentVersion(state);lastRunVersion=JSON.stringify(state.runs);}
 function updateSelection(){
  for(const id of selected)if(!pending().some(x=>x.id===id&&canSelectReview(x)))selected.delete(id);
  const items=pending().filter(i=>selected.has(i.id)),send=$('#approve-selected'),remove=$('#delete-selected');
@@ -190,7 +182,7 @@ async function cancelQueuedRun(id){
 }
 
 async function action(path,body,message,onSuccess){if(busy)return null;busy=true;try{const result=await api(path,body);onSuccess?.(result);toast(message);await refresh(true);return result}catch(e){toast(e.message);return null}finally{busy=false;render()}}
-function contentVersion(s){return localToday()+'|'+JSON.stringify([s.productionRuns,s.productionShipping,s.lukasTodos,s.mockupBatches,s.results,s.pipeline,s.unfulfilled,s.orderControls,s.specialistJobs,s.productionArchive,s.expedited,s.schedule,s.workspaceInputs,s.receiptConfirmation,s.connection.ready,(s.approvalQueue||[]).map(q=>q.reviewIds),(s.inputQueue||[]).map(q=>q.sources),s.runs.some(r=>['queued','running','dispatching'].includes(r.status))])}
+function contentVersion(s){return localToday()+'|'+JSON.stringify([s.productionShipping,s.lukasTodos,s.mockupBatches,s.results,s.pipeline,s.unfulfilled,s.orderControls,s.specialistJobs,s.productionArchive,s.expedited,s.schedule,s.workspaceInputs,s.receiptConfirmation,s.connection.ready,(s.approvalQueue||[]).map(q=>q.reviewIds),(s.inputQueue||[]).map(q=>q.sources),s.runs.some(r=>['queued','running','dispatching'].includes(r.status))])}
 function interactionInProgress(){return pointerActive}
 function viewElementKey(e){
  const scope=e.closest('[data-run-id]')?.dataset.runId||e.closest('[data-review-case]')?.dataset.reviewCase||e.closest('[data-group-id]')?.dataset.groupId||e.closest('.view')?.id||'';
@@ -249,8 +241,8 @@ for(const b of $$('.run-button'))b.onclick=()=>runAgent(b.dataset.run);$('#appro
 
 function pipelineAge(date){if(!date)return '—';const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());const days=Math.max(0,Math.floor((Date.parse(today+'T00:00:00Z')-Date.parse(date.slice(0,10)+'T00:00:00Z'))/86400000));return Number.isFinite(days)?days+'d':'—'}
 function pipelineDetails(row){const content=el('div');const fields=[['Current workflow',row.workflow],['Financial / fulfillment',[row.financialStatus,row.fulfillmentStatus].filter(Boolean).join(' / ')],['Why it is unfulfilled',row.reason],['Blocker',row.blocker],['Next step',row.nextAction],['Last meaningful message',row.lastMessage],['Production artwork',row.drive]];for(const [label,value] of fields){if(!value)continue;content.append(el('h3','pipeline-detail-label',label),el('p','dialog-caption',value))}if(row.details?.length){const d=el('details','pipeline-coverage');d.append(el('summary','','Full saved notes'));const list=el('ul');for(const line of row.details)list.append(el('li','dialog-caption',line));d.append(list);content.append(d)}const source=inputSource('oldest',row.order);if(source)content.append(decisionEditor(source));showDialog('#'+row.order+' · '+row.customer,[content])}
-function renderPipeline(){if(state){renderModernOrders(state,api);renderUnfulfilled();}}
-$('#refresh-orders').addEventListener('click',()=>action('/api/shopify/refresh',{},'Latest Shopify order facts refreshed.'));$('#pipeline-search').oninput=renderPipeline;for(const b of $$('#pipeline-filters button'))b.onclick=()=>{pipelineFilter=b.dataset.filter;for(const tab of $$('#pipeline-filters button'))tab.classList.toggle('active',tab===b);renderPipeline()};
+function renderPipeline(){if(state)renderUnfulfilled()}
+$('#refresh-orders').addEventListener('click',()=>action('/api/run',{mode:'mockup'},'Reconciliation queued. Open the status icon for progress.'));$('#pipeline-search').oninput=renderPipeline;for(const b of $$('#pipeline-filters button'))b.onclick=()=>{pipelineFilter=b.dataset.filter;for(const tab of $$('#pipeline-filters button'))tab.classList.toggle('active',tab===b);renderPipeline()};
 api('/api/state').then(s=>{if(s.hosted?.transport==='poll'){$('#pipeline-live-status').textContent='Checking for updates every 15s';return;}const events=new EventSource('/api/events');events.onopen=()=>{liveConnected=true;$('#pipeline-live-status').textContent='Live updates connected';$('#pipeline-live-dot').classList.remove('offline');refresh()};events.onmessage=()=>refresh();events.onerror=()=>{liveConnected=false;$('#pipeline-live-status').textContent='Reconnecting · checking every 15s';$('#pipeline-live-dot').classList.add('offline')};}).catch(()=>{});
 
 $('#send-all-answers').onclick=()=>{const answers=enteredAnswers();if(answers.length)submitInput('/api/answers',{answers},answers.map(a=>({category:'questions',id:a.id})),answers.length+' answers queued together for review.');};
@@ -513,7 +505,6 @@ function groupReviewItems(items){
 const openReviewGroups=new Set();
 function reviewWorkspaceCategory(item){
  const group=responseGroupId(item);
- if(item.category==='new_rug_inquiry'||item.workflowLabel==='Sales/New-Rug-Inquiry'||(group==='quotes'&&!item.order&&!item.orderId))return 'new_rug_inquiry';
  if(group==='customer_approvals')return 'flat_approvals';
  if(group==='approval_needs_reply')return 'approval_reply';
  if((item.workflowLabel||'').startsWith('Support/')||['support_general','support_chargeback','quality','billing','shipping','identity'].includes(group))return 'support';
@@ -797,7 +788,7 @@ function dashboardMetrics(snapshot,review,sendableIds,artworkIds,today){
  const tracked=unique((snapshot.pipeline?.orders||[]).filter(r=>open(r)&&r.eligible!==false));
  const window=expeditedProductionWindow(snapshot.schedule?.days||[],today);
  const validDay=d=>/^\d{4}-\d{2}-\d{2}$/.test(d||'')&&!Number.isNaN(Date.parse(d+'T12:00:00Z'));
- const priority=expedited.filter(r=>r.shippingPaymentVerified===true&&r.nextProductionRequired===true).sort((a,b)=>String(a.shipByDate||'9999').localeCompare(String(b.shipByDate||'9999'))||String(a.order).localeCompare(String(b.order)));
+ const priority=expedited.filter(r=>needsProduction(r,window)).sort((a,b)=>a.deadline.localeCompare(b.deadline)||String(a.order).localeCompare(String(b.order)));
  const overdue=expedited.filter(r=>validDay(r.deadline)&&r.deadline<today).sort((a,b)=>a.deadline.localeCompare(b.deadline));
  const undated=expedited.filter(r=>!validDay(r.deadline));
  const later=expedited.filter(r=>validDay(r.deadline)&&r.deadline>=today&&!priority.includes(r));
@@ -842,26 +833,24 @@ function renderHome(){
   {label:'Review queue',value:m.review.length,note:'Open customer conversations',open:()=>{location.hash='review'}},
   {label:'Replies to send',value:m.sendable.length,note:'Awaiting your approval',open:()=>homeOpenReview(m.sendable,'Replies to send')},
   {label:'Proofs pending',value:m.artwork.length,note:'Updated artwork required',open:()=>homeOpenReview(m.artwork,'Proofs pending')},
-  {label:'Due next production',value:m.priority.length,note:m.window?'Next run · '+dayLabel(m.window.start,{month:'short',day:'numeric'}):'Set a production date',open:()=>m.window?homeOpenExpedited(null,true):location.hash='calendar'},
+  {label:'Due next production',value:m.window?m.priority.length:'—',note:m.window?dayLabel(m.window.start,{month:'short',day:'numeric'})+'–'+dayLabel(m.window.end,{month:'short',day:'numeric'}):'Set a production date',open:()=>m.window?homeOpenExpedited(null,true):location.hash='calendar'},
   {label:'Overdue rush orders',value:m.overdue.length,note:'Past requested delivery date',tone:m.overdue.length?'danger':'',open:()=>homeShowOrders(m.overdue,'Overdue rush orders')},
   {label:'Runs needing attention',value:visibleHistoryRuns().filter(r=>['failed','interrupted','needs_attention'].includes(r.status)).length,note:'Recorded failures · view reasons',tone:failures.length?'danger':'',open:()=>{location.hash='history'}}
  ];
  $('#home-kpis').replaceChildren(...cards.map(c=>{const card=button('','home-kpi '+(c.tone||''),c.open);card.append(el('span','home-kpi-symbol',({ 'Review queue':'◎','Replies to send':'↗','Proofs pending':'▧','Due next production':'◷','Overdue rush orders':'!','Runs needing attention':'⚑' })[c.label]||'•'),el('span','home-kpi-label',c.label),el('strong','home-kpi-value',String(c.value)),el('small','home-kpi-note',c.note));return card}));
  $('#home-production-date').textContent=m.window?dayLabel(m.window.start,{weekday:'short',month:'short',day:'numeric'}):'No date scheduled';
- $('#home-production-window').textContent='Verified paid expedited orders requiring the next production run. Red outlines mark delivery deadlines between the next two production dates.';
+ $('#home-production-window').textContent=m.window?'Delivery dates '+dayLabel(m.window.start,{month:'short',day:'numeric'})+'–'+dayLabel(m.window.end,{month:'short',day:'numeric'}):'Choose a production date in the calendar.';
  const exp=state.expedited||{};$('#home-expedited-coverage').textContent=(exp.partial?'Partial list · ':'')+(exp.checkedAt?'Checked '+new Date(exp.checkedAt).toLocaleString():'Not checked');
- $('#home-priority-count').textContent=m.priority.length+' order'+(m.priority.length===1?'':'s');
+ $('#home-priority-count').textContent=m.window?m.priority.length+' order'+(m.priority.length===1?'':'s'):'';
  const body=$('#home-priority-rows');body.replaceChildren(...m.priority.map(row=>{
-  const urgency=expeditedUrgency(row,state.schedule?.days||[]),tr=el('tr',urgency.urgent?'is-urgent':''),identity=el('td');identity.append(el('strong','','#'+row.order),el('small','',row.customer||'Customer'));
-  if(urgency.urgent)identity.append(el('strong','priority-urgent-label','URGENT'));
-  const deadline=el('td','home-deadline',urgency.deliveryDeadline?dayLabel(urgency.deliveryDeadline,{weekday:'short',month:'short',day:'numeric'}):'Delivery deadline needed');
-  if(urgency.missingDates)deadline.append(el('small','','Delivery deadline or next two production dates needed'));
-  const payment=el('td','home-payment',row.shippingPaidCents!=null?'$'+(row.shippingPaidCents/100).toFixed(2)+' · Paid':'Paid · amount not recorded');
-  const next=el('td','home-next');next.append(el('span','order-status',row.mockupConfirmed===true?'Mockup confirmed':row.mockupSentAt?'Mockup awaiting confirmation':'Mockup needs attention'),el('p','',row.nextAction||'Review order details.'),el('small','',row.shipByDate?'Ship by '+row.shipByDate:'Shipping deadline needed'));
-  const action=el('td');action.append(button('Open','secondary',()=>showPaidExpeditedDetails(row)));tr.append(identity,deadline,payment,next,action);return tr;
+  const tr=el('tr'),identity=el('td');identity.append(el('strong','','#'+row.order),el('small','',row.customer||'Customer'));
+  const deadline=el('td','home-deadline',dayLabel(row.deadline,{weekday:'short',month:'short',day:'numeric'}));
+  const payment=el('td','home-payment',row.paymentStatus||row.quote||'Not verified');
+  const next=el('td','home-next',row.nextAction||'Review order details.');
+  const action=el('td');action.append(button('Open','secondary',()=>homeOpenExpedited(row.order)));tr.append(identity,deadline,payment,next,action);return tr;
  }));
  $('#home-priority-empty').hidden=!!m.priority.length;$('#home-priority-table').hidden=!m.priority.length;
- $('#home-priority-empty').textContent='No verified paid expedited orders requiring the next production run.';
+ $('#home-priority-empty').textContent=!m.window?'Schedule the next production run.':'No recorded expedited deadlines in this production window.';
  const flags=$('#home-priority-flags');flags.replaceChildren();if(m.overdue.length)flags.append(button(m.overdue.length+' overdue deadlines','home-flag danger',()=>homeShowOrders(m.overdue,'Overdue rush orders')));if(m.undated.length)flags.append(button(m.undated.length+' missing delivery date'+(m.undated.length===1?'':'s'),'home-flag',()=>homeShowOrders(m.undated,'Delivery date needed')));
  renderHomeDonut($('#home-review-chart'),[
   {label:'Replies to send',color:'#24775b',items:m.sendable,open:i=>homeOpenReview(i,'Replies to send')},
@@ -883,7 +872,7 @@ function renderHome(){
 $('#home-manage-priority').onclick=()=>homeOpenExpedited(null,true);
 
 const unfulfilledLabels={awaiting_mockup:'Awaiting Mockup',mockup_sent:'Mockup Sent',confirmation_sent:'Confirmation sent',in_production:'Label created / in transit'};
-function unfulfilledRows(){return (state?.unfulfilled?.orders||[]).filter(row=>String(row.fulfillmentStatus||'').toUpperCase()!=='FULFILLED').map(row=>{
+function unfulfilledRows(){return (state?.unfulfilled?.orders||[]).map(row=>{
  if(row.classificationConflict)return {...row,category:null};
  const shipped=(row.shipments||[]).some(s=>['UPS','FedEx'].includes(s.carrier)&&['label_created','in_transit'].includes(s.status)&&s.trackingNumber&&s.source&&typeof s.checkedAt==='string'&&/(Z|[+-]\d\d:\d\d)$/.test(s.checkedAt)&&Number.isFinite(Date.parse(s.checkedAt)));
  if(shipped)return {...row,category:'in_production'};
@@ -940,7 +929,28 @@ function renderUnfulfilledReports(){
  if(!runs.length)host.append(el('p','empty','No follow-up runs recorded yet.'));
  const orders=unfulfilledRows(),metrics=$('#unfulfilled-metrics');if(metrics)metrics.replaceChildren(...[['Unfulfilled',orders.length],['Awaiting mockup',orders.filter(o=>o.category==='awaiting_mockup').length],['Mockup sent',orders.filter(o=>o.category==='mockup_sent').length],['Confirmation sent',orders.filter(o=>o.category==='confirmation_sent').length],['Label / in transit',orders.filter(o=>o.category==='in_production').length]].map(([label,count])=>{const card=el('div','uf-metric');card.append(el('span','',label),el('strong','',String(count)));return card}));
 }
+function renderOverdueOrders(){
+ const q=state.orderControls?.overdueQueue;let host=document.getElementById('overdue-orders');
+ if(!host){host=el('section','review-card overdue-orders');host.id='overdue-orders';$('#unfulfilled-metrics').after(host)}
+ host.replaceChildren();const head=el('div','overdue-heading');head.append(el('h2','','Overdue'),el('span','pill amber',q?.verified?String(q.orders.length):'Not verified'));host.append(head);
+ if(!q?.verified){host.append(el('p','dialog-caption',q?.reason||'Latest Shopify order number is not verified. Run the inventory reconciliation.'));return}
+ host.append(el('p','dialog-caption','300+ order numbers behind · Latest #'+q.latestOrder+' · #'+q.cutoff+' and earlier · Checked '+unfulfilledDate(q.checkedAt)));
+ if(q.stale||!q.inventoryComplete)host.append(el('p','pipeline-blocker',(q.stale?'Latest-order reference is over 24 hours old. ':'')+(!q.inventoryComplete?'Inventory is incomplete; more overdue orders may exist.':'')));
+ if(!q.orders.length){host.append(el('p','empty','No overdue orders in this inventory.'));return}
+ const wrap=el('div','overdue-table-wrap'),table=el('table','overdue-table'),thead=el('thead'),header=el('tr');
+ for(const text of ['Order / customer','Behind','Next step','Action'])header.append(el('th','',text));thead.append(header);table.append(thead);const body=el('tbody');
+ for(const row of q.orders){const item=row.recoveryExcluded?{kind:'excluded',label:'Review Shopify / Support disposition'}:state.orderControls.items.find(i=>i.orderId===row.id),tr=el('tr'),identity=el('td');identity.append(button('#'+row.order+' · '+(row.customer||'Customer'),'unfulfilled-order-link',()=>unfulfilledDetails(row)),el('small','pipeline-customer',row.email||'Email not verified'));
+ const next=el('td');next.append(el('p','',row.nextAction||item?.label||'Reconcile current order evidence'),el('small','dialog-caption',row.blocker||row.qualification?.reason||row.workflow||'Current stage needs verification'));
+ const cell=el('td');const go=button('Go','primary',async()=>{
+  if(item?.kind==='review'){confirmApproval(pending().filter(r=>item.reviewIds.includes(r.id)));return}
+  if(item?.kind==='queued'){expandedRunChecklists.add(item.runId);location.hash='history';return}
+  if(item?.kind==='excluded'){unfulfilledDetails(row);return}
+  go.disabled=true;try{const result=await api('/api/order-action',{orderId:row.id,version:item?.version,overdue:true});toast('#'+row.order+(result.duplicate?' is already queued.':' next-action recovery queued.'));await refresh()}catch(error){toast(error.message)}finally{go.disabled=false}
+ });go.setAttribute('aria-label','Go — next action for order #'+row.order);go.disabled=!item;go.title=item?.kind==='review'?'Review the prepared reply':item?.kind==='queued'?'View current progress':item?.kind==='excluded'?'View why this order needs Shopify / Support handling':'Reconcile this order and prepare its next action through the shared queue';cell.append(go);if(item?.kind==='queued')cell.append(el('small','dialog-caption','Queued / processing'));if(item?.kind==='automatic')cell.append(el('small','dialog-caption','Automatic workflow rules still apply'));tr.append(identity,el('td','',String(row.ordersBehind)),next,cell);body.append(tr);
+ }table.append(body);wrap.append(table);host.append(wrap);
+}
 function renderUnfulfilled(){
+ renderOverdueOrders();
  renderUnfulfilledReports();
  renderOrderTarget();
  const data=state.unfulfilled||{orders:[],inventoryComplete:false},orders=unfulfilledRows(),automation=data.automation||{},query=$('#pipeline-search').value.trim().toLowerCase();
@@ -955,7 +965,7 @@ function renderUnfulfilled(){
  ],'unfulfilled');
  const unresolved=$('#unfulfilled-unclassified');unresolved.textContent=unknown.length+' need reconciliation';unresolved.disabled=!unknown.length;
  $('#unfulfilled-automation-mode').textContent=automation.mode==='live'?'Live':automation.mode==='paused'?'Paused':'Dry run';
- $('#unfulfilled-schedule').textContent='Weekdays · 6 AM & 6 PM · Los Angeles';
+ $('#unfulfilled-schedule').textContent='Weekdays · 7 AM & 7 PM · Los Angeles';
  $('#unfulfilled-next-run').textContent=automation.nextRun?'Next: '+unfulfilledDate(automation.nextRun):automation.schedule?.savedStatus==='PAUSED'?'Schedule paused':'Schedule not activated';
  $('#unfulfilled-last-run').textContent=data.lastSuccessfulReconciliationAt?'Last successful reconciliation: '+unfulfilledDate(data.lastSuccessfulReconciliationAt):'No complete reconciliation yet';
  const progress=data.report?.discovery?.inspectCandidates;const progressNode=document.getElementById('unfulfilled-scan-progress')||el('p','dialog-caption');progressNode.id='unfulfilled-scan-progress';progressNode.textContent=progress?progress.examined+' examined · '+progress.held+' held · '+progress.unexamined+' not yet examined'+(progress.recovered?' · '+progress.recovered+' recovered from saved evidence':''):'';$('#unfulfilled-last-run').after(progressNode);
@@ -999,8 +1009,6 @@ $('#refresh-orders').parentElement.append(historicalImport);
 
 let agentRunSubmitting=false;
 async function runAgent(mode){
- if(state?.hosted?.demo&&['banda','complete'].includes(mode)){try{showSimulation(await api('/api/demo/simulate',{mode}));}catch(e){toast(e.message);}return;}
-
  if(agentRunSubmitting)return;agentRunSubmitting=true;
  try{
   if(['banda','complete'].includes(mode)){
@@ -1101,9 +1109,3 @@ setInterval(async()=>{
  idleReviewCheckInFlight=true;
  try{const result=await api('/api/reconcile',{automatic:true});if(result.run)await refresh(true);}catch(error){const caption=document.getElementById('review-reconciliation-status');if(caption)caption.textContent='Automatic refresh unavailable: '+error.message;}finally{idleReviewCheckInFlight=false;}
 },120000);
-
-function showPaidExpeditedDetails(order){
- const content=el('div'),confirmed=order.mockupConfirmed===true;
- for(const [label,value] of [['Selected Parsel service',order.selectedService],['Paid shipping',order.shippingPaidCents!=null?'$'+(order.shippingPaidCents/100).toFixed(2):null],['Production cutoff',order.productionCutoffAt],['Production date',order.productionDate],['Shipping / handoff deadline',order.shipByDate],['Delivery deadline',order.deliveryDeadline],['Mockup',confirmed?'Confirmed':order.mockupSentAt?'Sent · awaiting confirmation':'Not sent / not verified'],['Confirmation time',order.mockupConfirmedAt],['Blocker',order.blocker],['Next action',order.nextAction]])content.append(el('h3','',label),el('p','',value||'Not recorded'));
- showDialog('#'+order.order+' · Expedited priority',[content]);
-}

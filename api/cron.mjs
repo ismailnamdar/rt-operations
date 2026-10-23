@@ -1,3 +1,4 @@
+import {processDriveRedo} from '../app/drive-redo.mjs';
 import {runtime} from '../app/vercel-runtime.mjs';
 import {secretEquals} from '../app/auth.mjs';
 import {advanceProductionStages} from '../app/stage-automation.mjs';
@@ -7,7 +8,7 @@ import {randomUUID} from 'node:crypto';
 export async function runScheduled(app){
  const lease=randomUUID();const claimed=await app.store.transaction(s=>{if(s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
  try{
-  const current=await app.store.read();if(current.productionFacts?.length)await app.store.transaction(s=>{advanceProductionStages(s);});
+  const current=await app.store.read();const redo=(current.redoRequests||[]).find(r=>r.status!=='resolved'&&!r.fileReturn?.verified);if(redo&&app.drive?.writeEnabled){await processDriveRedo({store:app.store,drive:app.drive,id:redo.id});return {ok:true,redoChecked:true};}if(app.drive&&(!current.snapshot.driveProduction?.checkedAt||Date.now()-Date.parse(current.snapshot.driveProduction.checkedAt)>300000)){await app.drive.sync(app.store);return {ok:true,driveSynced:true};}if(current.productionFacts?.length)await app.store.transaction(s=>{advanceProductionStages(s);});
   if(app.client&&!current.shopifyConnection?.revoked){
    if(current.shopifyImport?.status!=='complete')await importLatestOrders({store:app.store,client:app.client,pages:1});
    else {await processShopifyUpdates({store:app.store,client:app.client,limit:2});if(app.env.SHOPIFY_TAG_SYNC==='1')await syncShopifyStatuses({store:app.store,client:app.client,limit:4,deadline:Date.now()+45000});}
