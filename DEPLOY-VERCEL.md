@@ -1,5 +1,10 @@
 # SHUTTLE on Vercel — Rugtomize
 
+## October 16 interface merge
+
+SHUTTLE 2.0 is now the interface base for Home, Review, Orders, Mock-ups and Agents/History. The preview's Production run/order page is retained within Production. The separate Label Booker page, shortcut and agent card are removed. The original calendar controls remain on Production. Local compatibility uses the existing loopback SHUTTLE 2.0 runtime for real saved reviews and exact agent actions; Vercel does NOT use that local bridge. Its workflow execution integrations remain explicitly incomplete below. Do not describe a deployed UI as an exact cloud-hosted Hunt/GOAT engine.
+
+
 Standalone staff accounts, direct Shopify server API, Supabase PostgreSQL workflow persistence. Store: `47d43a.myshopify.com`. Initial owner: `info@rugtomize.co`. Use the Vercel production hostname first, then connect `shuttle.rugtomize.co`.
 
 ## What this release actually enables
@@ -102,3 +107,26 @@ Official references:
 - https://supabase.com/docs/guides/database/connecting-to-postgres/serverless-drivers
 - https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant
 - https://shopify.dev/docs/api/admin-graphql/latest/queries/orders
+
+
+## Read-only Production folder synchronization (October 16)
+
+Production is populated from the actual `Pro N` folders directly under DONE READY 4 PRINT (`1m2aiQXNJ9a_n3Mr12VU4W2OCZSYiLAeR`). Runs use immutable folder IDs. Every image/PDF file keeps its own Drive ID and preview. Files without an identifiable order number remain visible as exceptions; filename quantity suffixes do not establish verified physical/shipping quantities. Folder creation dates are not assigned as production dates. Generic inbox-review holds are not applied as production redo holds. No files are moved and no sharing permissions are changed.
+
+The local preview currently has an authenticated October 16 snapshot of Pro 1–5: 527 private cached previews, including two first-page PDF previews. This cache and its source inventory are deliberately excluded from the deployment ZIP.
+
+For hosted refresh:
+
+1. Enable Google Drive API in the Google Cloud project and use the existing web OAuth client's exact loopback callback `http://127.0.0.1:43842/oauth/google/callback`.
+2. Privately configure the helper's `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET`, set `GMAIL_CONNECT_MODE=drive_read_only`, then run `node app/connect-google.mjs` locally. Authorize `info@rugtomize.co`. This mode requests only Drive read-only access, verifies the account via Drive and stores a protected token in `data/drive-credentials.json`. It does not send email or modify Drive.
+3. Copy the client ID, client secret and saved refresh token directly into Vercel's private `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN` variables. Do not upload the token file, paste it into chat or put it in public environment variables. Redeploy.
+4. The minute scheduler refreshes the complete Pro-folder inventory approximately every five minutes; owners can also use **Refresh Drive folders**. Incomplete reads do not replace the last complete inventory. The current Drive scan gets its own scheduled invocation so Shopify work resumes on later ticks.
+5. Private thumbnails are fetched through the authenticated SHUTTLE server from Google's thumbnail service. The browser receives image bytes, not Google tokens or expiring thumbnail links. A missing scope/access/thumbnail remains a visible error rather than a guessed image.
+
+The live direct-Drive adapter is unit-tested with fake network responses; actual Vercel OAuth and thumbnail responses still require deployment verification. The local snapshot was read through the connected Drive plugin and all 527 cached previews were verified in the browser. The uploaded-sheet processing and automatic redo file-move adapters remain separate unfinished work.
+
+### Automatic redo artwork returns
+Authorize `info@rugtomize.co` with Google Drive write permission using connection mode `drive_write` (the existing `drive_read_only` grant cannot move files). The server-side OAuth client and refresh token remain private. Set `GDRIVE_WRITE_ENABLED=1` only after granting that permission. Full Drive scope is needed to access pre-existing production artwork; SHUTTLE restricts this operation to the selected source file in its verified Pro folder or the configured intake root. A redo moves that file to DONE READY 4 PRINT and inserts `.redo` before its extension. A follow-up metadata read verifies its name and root-only parent before queue entry is marked verified. Failed/uncertain returns remain flagged for reconciliation; there is no fake success in the local preview. Only selected files move, not every rug in the order.
+
+## October 22 update — Parsel is optional and disconnected by default
+SHUTTLE initializes without any Parsel token, URL or shipping settings. Leave `PARSEL_ENABLED` unset or `0`. Existing Parsel environment values are ignored until explicitly enabled. Booking, reconciliation, label retrieval and print requests cannot execute while disconnected. Existing orders, artwork, production records and shipping history are preserved. To configure later, explicitly set `PARSEL_ENABLED=1` and private credentials; live purchases remain disabled pending integration validation. Supabase, authentication and the relevant Google/Shopify connections retain their own setup requirements. This release includes the combined Mock-ups list with one-click Approve & send / Redo. Hosted GOAT processing still requires a hosted worker; the local SHUTTLE bridge is not a Vercel worker.

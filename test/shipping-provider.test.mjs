@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {shippingProvider,DisabledCarrier} from '../app/shipping-provider.mjs';
+test('shipping starts disconnected without initializing or validating any Parsel settings',async()=>{const p=shippingProvider({PARSEL_BASE_URL:'invalid',PARSEL_TOKEN:'ignored'});assert.ok(p instanceof DisabledCarrier);assert.equal(p.disabled,true);await assert.rejects(()=>p.buy({}),e=>e.status===503);await assert.rejects(()=>p.label({}),e=>e.status===503);});
+test('Parsel initialization requires explicit enablement and credentials',()=>{assert.throws(()=>shippingProvider({PARSEL_ENABLED:'1'}),/token is missing/);assert.equal(shippingProvider({PARSEL_ENABLED:'1',PARSEL_TOKEN:'test'}).liveBooking,false);});

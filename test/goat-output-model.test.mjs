@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {goatReviewPages,goatOutputKind} from '../app/public/goat-output-model.js';
+test('GOAT output pages contain at most 25 and preserve every original item identity',()=>{const rows=Array.from({length:61},(_,id)=>({id}));const pages=goatReviewPages(rows);assert.deepEqual(pages.map(p=>p.length),[25,25,11]);assert.deepEqual(pages.flat(),rows);assert.equal(pages[1][0],rows[25]);});
+test('new versus updated labels require explicit evidence, not guessed email text',()=>{assert.equal(goatOutputKind({},{request:'new design please'}),'unclassified');assert.equal(goatOutputKind({processingKind:'revision'},{}),'updated');assert.equal(goatOutputKind({},{processingKind:'new_order'}),'new');});
