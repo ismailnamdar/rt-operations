@@ -1,3 +1,18 @@
+# Supabase Auth update — staff sign-in
+
+This update supersedes the custom-password owner setup and invitation steps below. Hosted SHUTTLE now uses Supabase email/password authentication, verified server-side on protected requests. Old local-password sessions cannot bypass Supabase. The local demo remains explicitly separate.
+
+1. In your existing Supabase project, find the project URL and publishable key. Save them in Vercel as `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. An existing anon key can be supplied as `SUPABASE_ANON_KEY` for compatibility. Never use a service-role key for this login flow.
+2. Retain `DATABASE_URL` for private server-side workflow persistence. Auth keys do not replace the database connection.
+3. In Supabase Authentication, disable public signups for this staff-only app. Create/verify the initial owner identity `info@rugtomize.co` using the dashboard's supported user setup flow. Keep passwords private. SHUTTLE grants the configured owner email initial owner access only when no owner already exists. Existing users retain their app roles; a disabled user cannot log in.
+4. Redeploy only after credentials and owner access are ready. Without Auth configuration, login fails closed rather than falling back to demo or custom passwords.
+5. To add teammates, authorize their exact work email and role from SHUTTLE Team accounts, then provision that same verified identity/password in Supabase Authentication → Users. Existing legacy passwords do not migrate. Password setup/recovery is currently managed in Supabase; the old SHUTTLE reset-link route is disabled in this mode.
+6. Test owner/warehouse/viewer sign-in, authorization and logout. Current sessions last up to one hour (or the provider's shorter lifetime), then require sign-in again. Background token refresh and self-service recovery UI are not included in this first adapter.
+
+No Supabase project, auth user, password, policy or existing database record is changed by preparing this source update. The application binds verified Supabase identities to existing SHUTTLE records without replacing workflow data.
+
+---
+
 # SHUTTLE on Vercel — Rugtomize
 
 ## October 16 interface merge
