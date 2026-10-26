@@ -4,5 +4,5 @@ else if(response.ok){const s=await response.json(),role=s.hosted.user.role,heade
  const logout=document.createElement('button');logout.className='secondary';logout.textContent='Sign out';logout.onclick=async()=>{await fetch('/auth/logout',{method:'POST',headers:{'Content-Type':'application/json','X-Shuttle-Token':s.token},body:'{}'});location.replace('/login');};header?.append(logout);
  if(role!=='owner')for(const selector of ['[data-nav="agents"]','[data-nav="questions"]','.run-button'])for(const e of document.querySelectorAll(selector))e.hidden=true;
  const profile=document.querySelector('.profile');if(profile){profile.removeAttribute('href');profile.querySelector('small').textContent='Hosted workspace';}
- if(s.hosted.demo){const notice=document.createElement('p');notice.className='warehouse-notice';notice.textContent='SHUTTLE migration preview — test shipments only. Gmail, Shopify, Parsel and GOAT are not connected.';document.querySelector('main')?.prepend(notice);}
+ if(s.hosted.demo){const notice=document.createElement('p');notice.className='warehouse-notice';notice.textContent=s.hosted.shuttle2Local?'SHUTTLE 2.0 · existing data and agent actions. Production label purchases remain disabled.':'SHUTTLE migration preview — test shipments only. Gmail, Shopify, Parsel and GOAT are not connected.';document.querySelector('main')?.prepend(notice);}
 }

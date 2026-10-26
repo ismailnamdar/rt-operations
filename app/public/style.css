@@ -259,3 +259,29 @@ main{padding-top:26px}header{height:64px}.page-heading{margin-bottom:22px}.page-
 .run-step.pending,.run-step.unknown,.run-step.skipped{border-color:#dfe5e1;background:#f7f9f8}.run-step.pending .run-step-icon,.run-step.unknown .run-step-icon,.run-step.skipped .run-step-icon{color:#68796e;background:#e9eeeb}.run-step.failed .run-step-icon{color:#b24137;background:#ffebe8}.run-step.running .run-step-icon{color:#957014;background:#fff4ce}
 
 .idle-review-refresh{display:inline-flex;align-items:center;gap:6px;font-size:12px;margin-left:12px;color:#496353}.draft-suggestion{margin-top:8px;padding:10px;border:1px solid #c9ddcf;border-radius:8px}.draft-suggestion .reply-body{white-space:pre-wrap;max-height:320px;overflow:auto}
+
+.history-card.has-history-trash{position:relative}.has-history-trash .history-head{padding-right:38px}.history-trash{position:absolute;top:14px;right:14px;width:32px;height:32px;display:grid;place-items:center;background:transparent;color:#748079;border-radius:7px;padding:0}.history-trash:hover{background:#fff0ee;color:#b24035}.history-trash:focus-visible{outline:2px solid #24775b;outline-offset:2px}
+
+/* Mock-up review: separate navigation, selection and batch actions. */
+.mockup-category-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0 16px;margin-bottom:4px;border-bottom:1px solid var(--line,#dae0dd)}
+.mockup-category-toolbar .tabs{grid-column:1;display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.mockup-category-toolbar button{white-space:nowrap;min-height:36px}
+.mockup-batch-actions{grid-column:2;grid-row:1;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.mockup-selection-actions{grid-column:1/-1;grid-row:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:12px;border-top:1px solid var(--line,#dae0dd)}
+.mockup-selection-actions label{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;cursor:pointer;font-weight:600;margin:0}
+.mockup-selection-actions small{white-space:nowrap;color:#61706a;margin-right:auto}
+.mockup-selection-actions input,.mockup-row-head>input{width:18px;height:18px;flex:0 0 18px;margin:0;accent-color:#16734a;cursor:pointer}
+.mockup-row-head{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:start;gap:12px}
+.mockup-row-head>input{margin-top:3px}
+.mockup-row-identity{min-width:0;overflow-wrap:anywhere}
+.mockup-row-identity strong{font-size:16px;line-height:1.4}
+.mockup-row-head small{line-height:1.5}
+.mockup-row-actions{flex-wrap:wrap;justify-content:flex-end}
+.mockup-proof>small{overflow-wrap:anywhere;color:#61706a;font-size:12px}
+.mockup-proof-pair figure{border:1px solid #e2e9e5;background:#f7f9f8}
+.mockup-proof-pair img{display:block;background:#fff}
+.mockup-row-details summary{padding:10px 0;font-size:13px;font-weight:600}
+@media(max-width:1050px){.mockup-category-toolbar{grid-template-columns:1fr}.mockup-batch-actions{grid-column:1;grid-row:2;justify-content:flex-start}.mockup-selection-actions{grid-row:3}}
+@media(max-width:560px){.mockup-row-head{grid-template-columns:18px minmax(0,1fr)}.mockup-row-actions{grid-column:2;justify-content:flex-start}.mockup-selection-actions small{margin-right:0}.mockup-category-toolbar{position:static}.mockup-proof-pair{gap:8px}.mockup-proof-pair figcaption{font-size:11px;padding:8px}.mockup-compact-row{padding:12px}}
+
+.overdue-orders{border-left:4px solid #315d48;margin-bottom:18px}.overdue-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.overdue-heading h2{margin:0}.overdue-table-wrap{overflow-x:auto}.overdue-table{width:100%;border-collapse:collapse;margin-top:12px}.overdue-table th{text-align:left;font-size:12px;color:#61706a;padding:10px}.overdue-table td{padding:14px 10px;border-top:1px solid #e2e9e5;vertical-align:top}.overdue-table td p{margin:0 0 5px}.overdue-table td small{display:block;margin-top:5px}.overdue-table td:last-child{width:100px}.overdue-table button:focus-visible{outline:3px solid #5989ca;outline-offset:3px}@media(max-width:650px){.overdue-table{min-width:600px}}

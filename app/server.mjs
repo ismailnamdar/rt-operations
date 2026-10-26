@@ -1,3 +1,6 @@
+import {DisabledCarrier,shippingProvider} from './shipping-provider.mjs';
+import {processDriveRedo} from './drive-redo.mjs';
+import {controlCenter,acknowledgeControl} from './control-center.mjs';
 import {visibleSnapshot} from './visibility.mjs';
 import {bootstrapOwner,inviteUser,acceptInvitation,disableUser} from './accounts.mjs';
 import {ShopifyStatusClient,syncShopifyStatuses} from './shopify-status.mjs';
@@ -19,9 +22,9 @@ import {saveReviews,approveReviews} from './reviews.mjs';
 import {GmailClient} from './gmail.mjs';
 import {processApprovedEmails,reconcileApprovedEmails} from './email-worker.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-export async function createServer({store,provider,origin='http://127.0.0.1:43841',stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null}={}){
- store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=new MockCarrier();const events=new Set();
- const files=['app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
+export async function createServer({store,provider,origin='http://127.0.0.1:43841',stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null}={}){
+ store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=demo?new MockCarrier():new DisabledCarrier();const events=new Set();
+ const files=['goat-output-model.js','control-center.js','app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
  const clientVersion=createHash('sha256').update((await Promise.all(files.map(n=>fs.readFile(path.join(here,'public',n))))).join('')).digest('hex').slice(0,16);
  function publish(){for(const res of events)res.write('data: changed\n\n');}
  function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
@@ -29,7 +32,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
  const server=http.createServer(async(req,res)=>{try{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   const url=new URL(req.url,origin);if(req.headers.host!==new URL(origin).host)fail('Unexpected host',403);
-  if(url.pathname==='/health')return json(res,200,{ok:true,mode:demo?'test':'configured',carrier:provider instanceof MockCarrier?'mock':'parsel'});
+  if(url.pathname==='/health')return json(res,200,{ok:true,mode:demo?'test':'configured',carrier:provider.disabled?'disconnected':provider instanceof MockCarrier?'mock':'parsel'});
   if(url.pathname==='/favicon.ico'){res.writeHead(204);return res.end();}
   if(req.method==='POST'&&url.pathname==='/auth/login'){
    if(req.headers.origin!==origin)fail('Same-origin login required',403);
@@ -62,9 +65,13 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
   const user=auth.user;
   if(req.method==='POST'){
    if(req.headers.origin!==origin||!secretEquals(req.headers['x-shuttle-token'],auth.session.csrf))fail('Reload SHUTTLE before submitting',403);const b=await body(req);let result;
+   if(provider.disabled&&['/api/warehouse/production-approve','/api/warehouse/book','/api/warehouse/approve-run','/api/warehouse/print','/api/warehouse/print-run','/api/warehouse/reprint','/api/warehouse/reconcile'].includes(url.pathname))provider.unavailable();
+   if(shuttle2?.handles('POST',url.pathname)){requireRole(user,['owner']);const response=await shuttle2.request('POST',url.pathname+url.search,b);res.writeHead(response.status,{'Content-Type':response.type,'Cache-Control':'no-store'});return res.end(response.bytes);}
    if(url.pathname==='/auth/logout'){await store.transaction(s=>{s.sessions=s.sessions.filter(x=>x.hash!==digest(cookie));return true;});res.setHeader('Set-Cookie','shuttle_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
    if(url.pathname==='/api/team/invite')result=await inviteUser(store,user,b,origin);
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
+   else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
+   else if(url.pathname==='/api/drive/sync'){requireRole(user,['owner']);if(!drive)fail('Read-only Drive authorization is not configured',503);result=await drive.sync(store);}
    else if(url.pathname==='/api/shopify/refresh'){requireRole(user,['owner']);if(!shopifyRefresh)fail('Shopify connection is not configured',503);result=await shopifyRefresh();}
    else if(url.pathname==='/api/shopify/import'){requireRole(user,['owner']);if(!shopifyImport)fail('Shopify connection is not configured',503);result=await shopifyImport();}
    else if(url.pathname==='/api/warehouse/import')result=await store.transaction(s=>importIntent(s,user,b));
@@ -77,7 +84,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    else if(url.pathname==='/api/warehouse/print-run'){requireRole(user,['owner','warehouse']);result=await store.transaction(s=>{const rows=s.intents.filter(i=>i.approved.productionId===b.productionId&&i.booking&&!i.redoHold);const jobs=rows.map(i=>enqueuePrint(s,user,i,false)).filter(Boolean);return {jobs};});}
    else if(url.pathname==='/api/warehouse/stage')result=await store.transaction(s=>setOrderStage(s,user,b));
    else if(url.pathname==='/api/warehouse/redo/resolve')result=await store.transaction(s=>resolveRedo(s,user,b));
-   else if(url.pathname==='/api/warehouse/redo')result=await store.transaction(s=>requestRedo(s,user,b));
+   else if(url.pathname==='/api/warehouse/redo'){result=await store.transaction(s=>requestRedo(s,user,b));await processDriveRedo({store,drive,id:result.id});}
    else if(url.pathname==='/api/warehouse/print'){requireRole(user,['owner','warehouse']);result=await store.transaction(s=>{const i=s.intents.find(i=>i.id===b.id);if(!i?.booking)fail('Waiting for owner booking approval');return {job:enqueuePrint(s,user,i,false)};});}
    else if(url.pathname==='/api/warehouse/reprint')result=await store.transaction(s=>reprint(s,user,b.id));
    else if(url.pathname==='/api/warehouse/reconcile')result=await reconcileBooking({store,provider,user,id:b.id});
@@ -95,14 +102,23 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    publish();return json(res,200,result);
   }
   if(req.method!=='GET')fail('Method not allowed',405);
+  if(shuttle2?.handles('GET',url.pathname)){requireRole(user,['owner']);const response=await shuttle2.request('GET',url.pathname+url.search);res.writeHead(response.status,{'Content-Type':response.type,'Cache-Control':'no-store'});return res.end(response.bytes);}
+  if(url.pathname==='/api/production/preview'){
+   const id=url.searchParams.get('id');if((!drivePreviewDir&&!drive)||!/^[a-zA-Z0-9_-]+$/.test(id||'')||!state.snapshot.driveProduction?.fileIds.includes(id))fail('Verified preview not available',404);
+   if(drive&&!drivePreviewDir){try{const preview=await drive.preview(id,state.snapshot.driveProduction,state.snapshot.productionRuns.runs.map(r=>r.id));res.writeHead(200,{'Content-Type':preview.type,'Cache-Control':'private, max-age=300'});return res.end(preview.bytes);}catch{fail('Drive preview needs authorization or reconciliation',503);}}
+   let bytes;try{bytes=await fs.readFile(path.join(drivePreviewDir,id+'.jpg'));}catch{fail('Preview cache is not ready',404);}res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=300'});return res.end(bytes);
+  }
   if(url.pathname==='/api/team'){requireRole(user,['owner']);return json(res,200,{users:state.users.map(({id,email,role,disabled,flagManager})=>({id,email,role,disabled:!!disabled,flagManager:!!flagManager}))});}
   if(url.pathname==='/api/warehouse/label'){requireRole(user,['owner','warehouse']);const i=state.intents.find(i=>i.id===url.searchParams.get('id'));if(!i?.booking)fail('No booked label',404);const bytes=await provider.label(i.booking),pdf=bytes.subarray(0,4).toString()==='%PDF';res.writeHead(200,{'Content-Type':pdf?'application/pdf':'application/octet-stream','Content-Disposition':`${pdf?'inline':'attachment'}; filename="booked-label.${pdf?'pdf':'zpl'}"`,'Cache-Control':'no-store'});return res.end(bytes);}
   if(url.pathname==='/api/events'&&serverless)return json(res,200,{transport:'poll',intervalMs:15000});
   if(url.pathname==='/api/events'){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive'});res.write('retry: 3000\ndata: connected\n\n');events.add(res);const timer=setInterval(()=>{if(auth.session.expiresAt<=Date.now()){res.end();return;}res.write(': keepalive\n\n');},25000);req.on('close',()=>{clearInterval(timer);events.delete(res);});return;}
   if(url.pathname==='/api/live'||url.pathname==='/api/state'){
-   const s=await store.read(),revision=String(s.revision);if(url.searchParams.get('since')===revision)return json(res,200,{revision,unchanged:true});
+   const s=await store.read(),original=shuttle2&&user.role==='owner'?await shuttle2.snapshot():null,revision=String(s.revision)+(original?'-'+createHash('sha256').update(JSON.stringify(original)).digest('hex').slice(0,16):'');if(url.searchParams.get('since')===revision)return json(res,200,{revision,unchanged:true});
+   if(original?.schedule&&JSON.stringify(s.snapshot.schedule)!==JSON.stringify(original.schedule)){await store.transaction(current=>{current.snapshot.schedule=structuredClone(original.schedule);});s.snapshot.schedule=structuredClone(original.schedule);}
    const emailReady=emailSendingEnabled&&!!gmail?.configured();
-   const snapshot={...s.snapshot,shopifyStatus:{configured:!!shopify,items:s.shopifyStatusSync||{},import:s.shopifyImport||null},simulationMail:demo?MOCK_MAIL:[],runs:s.jobs.map(({items,receipts,...j})=>({...j,status:j.status==='processing'?'running':j.status,receiptSummary:receipts?Object.values(receipts).map(({status,messageId,error})=>({status,messageId,error})):[]})),token:auth.session.csrf,clientVersion,connection:{ready:emailReady,message:emailReady?'Direct Gmail sender connected; order and production gates remain.':'Email integrations are awaiting connection. Warehouse controls are available for the configured test mode.'},localSpeed:{idleReviewRefresh:false},orderControls:{items:[],warnings:[],target:80,visible:0,aboveTarget:0,complete:false,unclassified:0,overdue:0},specialistJobs:[],inputQueue:[],approvalQueue:s.jobs.filter(j=>j.mode==='approve'&&['queued','processing','uncertain'].includes(j.status)).map(j=>({runId:j.id,status:j.status,reviewIds:j.items.map(i=>i.id)})),workspaceInputs:[],receiptConfirmation:null,productionArchive:null,productionShipping:{intents:s.intents,printJobs:s.printJobs,redoRequests:s.redoRequests||[],orderStages:s.orderStages||{},cutoffs:s.productionCutoffs||[],upcomingIntake:upcomingIntake(s),prescanJobs:s.prescanJobs||[]},hosted:{transport:serverless?'poll':'events',user:{email:user.email,role:user.role},demo,carrier:provider instanceof MockCarrier?'mock':'parsel',gmail:{configured:!!gmail?.configured(),sendingEnabled:emailReady,mailbox:'info@rugtomize.co'}}};
+   const snapshot={...s.snapshot,shopifyStatus:{configured:!!shopify,items:s.shopifyStatusSync||{},import:s.shopifyImport||null},simulationMail:demo?MOCK_MAIL:[],runs:s.jobs.map(({items,receipts,...j})=>({...j,status:j.status==='processing'?'running':j.status,receiptSummary:receipts?Object.values(receipts).map(({status,messageId,error})=>({status,messageId,error})):[]})),token:auth.session.csrf,clientVersion,connection:{ready:emailReady,message:emailReady?'Direct Gmail sender connected; order and production gates remain.':'Email integrations are awaiting connection. Warehouse controls are available for the configured test mode.'},localSpeed:{idleReviewRefresh:false},orderControls:{items:[],warnings:[],target:80,visible:0,aboveTarget:0,complete:false,unclassified:0,overdue:0},specialistJobs:[],inputQueue:[],approvalQueue:s.jobs.filter(j=>j.mode==='approve'&&['queued','processing','uncertain'].includes(j.status)).map(j=>({runId:j.id,status:j.status,reviewIds:j.items.map(i=>i.id)})),workspaceInputs:[],receiptConfirmation:null,productionArchive:null,productionShipping:{bookingHistory:s.events.filter(e=>e.type==='label_booked').map(({intentId,at})=>({intentId,at})),transitions:s.productionTransitions||[],controlCenter:controlCenter(s,user),upcomingRunId:s.settings.upcomingProductionRunId,intents:s.intents,printJobs:s.printJobs,redoRequests:s.redoRequests||[],orderStages:s.orderStages||{},cutoffs:s.productionCutoffs||[],upcomingIntake:upcomingIntake(s),prescanJobs:s.prescanJobs||[]},hosted:{drive:{configured:!!drive},transport:serverless?'poll':'events',user:{email:user.email,role:user.role},demo,carrier:provider.disabled?'disconnected':provider instanceof MockCarrier?'mock':'parsel',gmail:{configured:!!gmail?.configured(),sendingEnabled:emailReady,mailbox:'info@rugtomize.co'}}};
+   if(s.snapshot.driveProduction){const ids=new Set(s.snapshot.productionRuns.runs.map(r=>r.id));snapshot.productionShipping.intents=snapshot.productionShipping.intents.filter(i=>ids.has(i.approved.productionId));snapshot.productionShipping.redoRequests=snapshot.productionShipping.redoRequests.filter(r=>ids.has(r.productionId));snapshot.productionShipping.cutoffs=snapshot.productionShipping.cutoffs.filter(c=>ids.has(c.runId));snapshot.productionShipping.upcomingIntake={...snapshot.productionShipping.upcomingIntake,approvals:(snapshot.productionShipping.upcomingIntake.approvals||[]).filter(a=>!String(a.id||'').startsWith('TEST-')&&!a.isTest),redos:(snapshot.productionShipping.upcomingIntake.redos||[]).filter(r=>ids.has(r.productionId)),approvalWindowVerified:snapshot.productionShipping.cutoffs.length>0};snapshot.productionShipping.driveInventory=s.snapshot.driveProduction;}
+   if(original){const retained={goatOutputs:snapshot.goatOutputs,productionRuns:snapshot.productionRuns,token:snapshot.token,clientVersion:snapshot.clientVersion,productionShipping:snapshot.productionShipping,hosted:{...snapshot.hosted,transport:'poll',shuttle2Connected:!!original.connection?.ready,shuttle2Local:true},shopifyStatus:snapshot.shopifyStatus};Object.assign(snapshot,original,retained);}
    visibleSnapshot(snapshot,user);return json(res,200,url.pathname==='/api/state'?snapshot:{revision,full:snapshot});
   }
   const name=url.pathname==='/'?'index.html':url.pathname.slice(1);if(!files.includes(name))fail('Not found',404);let content=await fs.readFile(path.join(here,'public',name));if(name==='index.html')content=content.toString().replace('src="/app.js"',`src="/app.js?v=${clientVersion}"`);res.writeHead(200,{'Content-Type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html','Cache-Control':'no-store'});return res.end(content);
@@ -115,8 +131,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  const origin=process.env.SHUTTLE_ORIGIN||'http://127.0.0.1:43841',demo=process.env.SHUTTLE_DEMO==='1';
  if(process.env.NODE_ENV==='production'&&(!origin.startsWith('https:')||!process.env.DATABASE_URL))throw Error('Production requires HTTPS origin and PostgreSQL');
- if(!demo&&!process.env.PARSEL_TOKEN)throw Error('Configure Parsel credentials or explicitly select SHUTTLE_DEMO=1');
- const provider=demo?new MockCarrier():new ParselCarrier({token:process.env.PARSEL_TOKEN,baseUrl:process.env.PARSEL_BASE_URL,liveBooking:process.env.PARSEL_LIVE_BOOKING==='1',labelHosts:(process.env.PARSEL_LABEL_HOSTS||'').split(',').filter(Boolean)});
+ const provider=demo?new MockCarrier():shippingProvider(process.env);
  const oauth=process.env.GMAIL_OAUTH_TOKEN_FILE?JSON.parse(await fs.readFile(process.env.GMAIL_OAUTH_TOKEN_FILE,'utf8')):{};
  const gmail=new GmailClient({clientId:process.env.GMAIL_CLIENT_ID,clientSecret:process.env.GMAIL_CLIENT_SECRET,refreshToken:oauth.refreshToken||process.env.GMAIL_REFRESH_TOKEN,mailbox:'info@rugtomize.co'});
  const shopify=!demo&&process.env.SHOPIFY_TAG_SYNC==='1'?new ShopifyStatusClient({shop:process.env.SHOPIFY_STORE,token:process.env.SHOPIFY_ADMIN_TOKEN}):null;
