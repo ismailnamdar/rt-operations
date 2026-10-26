@@ -24,7 +24,7 @@ export function importIntent(s,user,p){requireRole(user,['owner']);validatePresc
 export function pack(s,user,id,rugId){requireRole(user,['owner','warehouse']);const i=s.intents.find(x=>x.id===id);if(!i||i.status!=='approved')fail('Shipment is not open for packing');if(!i.approved.units.some(u=>u.id===rugId))fail('Rug does not belong in this shipment');if(!i.packed.includes(rugId)){i.packed.push(rugId);record(s,'rug_packed',user,{intentId:id,rugId});}return i;}
 function checkReady(i){if(!i)fail('Unknown shipment',404);if(i.redoHold)fail('Redo requested; the whole order is on hold');if(fingerprint(i.approved)!==i.approvalHash)fail('Prescan changed; owner must approve a new version');validatePrescan(i.approved);if(i.approved.units.some(u=>u.qcPassed!==true)||i.packed.length!==i.approved.units.length)fail('Every expected rug must pass QC and be packed');}
 export async function scanAndBook({store,provider,user,id,queuePrint=true}){
- requireRole(user,['owner','warehouse']);
+ requireRole(user,['owner']);
  const intent=await store.transaction(s=>{const i=s.intents.find(x=>x.id===id);if(i?.booking)return {existing:true,...i};checkReady(i);if(i.status!=='approved')fail('Booking already started or requires reconciliation');i.status='checking';record(s,'booking_check_started',user,{intentId:id});return i;});
  if(intent.existing)return {intent,duplicate:true};
  let purchasing=false;

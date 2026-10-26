@@ -18,7 +18,7 @@ let syncing=false;
 async function syncShopify(){if(syncing||!client)return;syncing=true;try{
  const state=await store.read();if(!state.shopifyOAuth||state.shopifyConnection?.revoked)return;
  if(state.shopifyImport?.status!=='complete')await importLatestOrders({store,client,pages:1});
- else {await syncChangedOrders({store,client,pages:2});await processShopifyUpdates({store,client,limit:10});}
+ else {await syncChangedOrders({store,client,pages:state.shopifySync?.lastSuccessAt?2:10});await processShopifyUpdates({store,client,limit:10});}
 }catch{console.error('Shopify read synchronization needs attention; pending work is retained.');}finally{syncing=false;}}
 const syncTimer=setInterval(syncShopify,60000);syncTimer.unref();void syncShopify();
 server.on('close',()=>clearInterval(syncTimer));
