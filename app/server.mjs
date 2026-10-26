@@ -17,7 +17,7 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
 import {createStore} from './store.mjs';
 import {login,sessionFor,secretEquals,requireRole,digest} from './auth.mjs';
-import {MockCarrier,ParselCarrier} from './parsel.mjs';
+import {MockCarrier,ParselCarrier,labelFormat} from './parsel.mjs';
 import {importIntent,pack,approveProductionAndBook,scanAndBook,reprint,claimPrint,completePrint,verifyApplied,reconcileBooking,enqueuePrint,requestRedo,resolveRedo,record,fail,fingerprint} from './shipping.mjs';
 import {saveReviews,approveReviews} from './reviews.mjs';
 import {GmailClient} from './gmail.mjs';
@@ -55,7 +55,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    if(!secretEquals(bearer,stationToken))fail('Station authorization required',401);
    if(req.method==='POST'&&url.pathname==='/api/station/claim'){const result=await store.transaction(s=>claimPrint(s,'warehouse-zebra'));publish();return json(res,200,result);}
    if(req.method==='POST'&&url.pathname==='/api/station/complete'){const b=await body(req),result=await store.transaction(s=>completePrint(s,'warehouse-zebra',b));publish();return json(res,200,result);}
-   if(req.method==='GET'&&url.pathname==='/api/station/label'){const s=await store.read(),j=s.printJobs.find(x=>x.id===url.searchParams.get('id')&&x.status==='claimed'&&x.station==='warehouse-zebra'&&x.claimToken===url.searchParams.get('claim'));if(!j)fail('Valid print claim required',403);const i=s.intents.find(i=>i.id===j.intentId),bytes=await provider.label(i.booking);res.writeHead(200,{'Content-Type':'application/octet-stream','Cache-Control':'no-store'});return res.end(bytes);}
+   if(req.method==='GET'&&url.pathname==='/api/station/label'){const s=await store.read(),j=s.printJobs.find(x=>x.id===url.searchParams.get('id')&&x.status==='claimed'&&x.station==='warehouse-zebra'&&x.claimToken===url.searchParams.get('claim'));if(!j)fail('Valid print claim required',403);const i=s.intents.find(i=>i.id===j.intentId),bytes=await provider.label(i.booking);if(j.format!=='ZPL'||labelFormat(bytes)!=='ZPL')fail('Print station requires verified ZPL bytes');res.writeHead(200,{'Content-Type':'application/octet-stream','Cache-Control':'no-store'});return res.end(bytes);}
    fail('Unknown station action',404);
   }
   if(url.pathname.startsWith('/api/workflow/')){
@@ -115,7 +115,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    let bytes;try{bytes=await fs.readFile(path.join(drivePreviewDir,id+'.jpg'));}catch{fail('Preview cache is not ready',404);}res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=300'});return res.end(bytes);
   }
   if(url.pathname==='/api/team'){requireRole(user,['owner']);return json(res,200,{users:state.users.map(({id,email,role,disabled,flagManager})=>({id,email,role,disabled:!!disabled,flagManager:!!flagManager}))});}
-  if(url.pathname==='/api/warehouse/label'){requireRole(user,['owner','warehouse']);const i=state.intents.find(i=>i.id===url.searchParams.get('id'));if(!i?.booking)fail('No booked label',404);const bytes=await provider.label(i.booking),pdf=bytes.subarray(0,4).toString()==='%PDF';res.writeHead(200,{'Content-Type':pdf?'application/pdf':'application/octet-stream','Content-Disposition':`${pdf?'inline':'attachment'}; filename="booked-label.${pdf?'pdf':'zpl'}"`,'Cache-Control':'no-store'});return res.end(bytes);}
+  if(url.pathname==='/api/warehouse/label'){requireRole(user,['owner','warehouse']);const i=state.intents.find(i=>i.id===url.searchParams.get('id'));if(!i?.booking)fail('No booked label',404);const bytes=await provider.label(i.booking),format=labelFormat(bytes),inline=['PDF','PNG'].includes(format);res.writeHead(200,{'Content-Type':format==='PDF'?'application/pdf':format==='PNG'?'image/png':'application/octet-stream','Content-Disposition':`${inline?'inline':'attachment'}; filename="booked-label.${format.toLowerCase()}"`,'Cache-Control':'no-store'});return res.end(bytes);}
   if(url.pathname==='/api/events'&&serverless)return json(res,200,{transport:'poll',intervalMs:15000});
   if(url.pathname==='/api/events'){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive'});res.write('retry: 3000\ndata: connected\n\n');events.add(res);const timer=setInterval(()=>{if(auth.session.expiresAt<=Date.now()){res.end();return;}res.write(': keepalive\n\n');},25000);req.on('close',()=>{clearInterval(timer);events.delete(res);});return;}
   if(url.pathname==='/api/live'||url.pathname==='/api/state'){
