@@ -16,6 +16,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
 import {createStore} from './store.mjs';
+import {resolveOrigins} from './origins.mjs';
 import {login,sessionFor,secretEquals,requireRole,digest} from './auth.mjs';
 import {MockCarrier,ParselCarrier,labelFormat} from './parsel.mjs';
 import {importIntent,pack,approveProductionAndBook,scanAndBook,reprint,claimPrint,completePrint,verifyApplied,reconcileBooking,enqueuePrint,requestRedo,resolveRedo,record,fail,fingerprint} from './shipping.mjs';
@@ -23,29 +24,30 @@ import {saveReviews,approveReviews} from './reviews.mjs';
 import {GmailClient} from './gmail.mjs';
 import {processApprovedEmails,reconcileApprovedEmails} from './email-worker.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-export async function createServer({store,provider,origin='http://127.0.0.1:43841',stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null,shopifyWebhookSetup=null}={}){
+export async function createServer({store,provider,origin='http://127.0.0.1:43841',allowedOrigins=[origin],stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null,shopifyWebhookSetup=null}={}){
  store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=demo?new MockCarrier():new DisabledCarrier();const events=new Set();
  const files=['goat-output-model.js','control-center.js','app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
  const clientVersion=createHash('sha256').update((await Promise.all(files.map(n=>fs.readFile(path.join(here,'public',n))))).join('')).digest('hex').slice(0,16);
+ const hosts=new Map(allowedOrigins.map(o=>[new URL(o).host,o]));
  function publish(){for(const res of events)res.write('data: changed\n\n');}
  function json(res,status,data){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
  async function body(req){if(req.body!==undefined){if(!String(req.headers['content-type']).startsWith('application/json'))fail('JSON required',415);const bytes=Buffer.byteLength(JSON.stringify(req.body));if(bytes>2*1024*1024)fail('Request exceeds limit',413);if(typeof req.body!=='object'||req.body===null)fail('JSON required',415);return req.body;}if(!String(req.headers['content-type']).startsWith('application/json'))fail('JSON required',415);let bytes=0,text='';for await(const chunk of req){bytes+=chunk.length;if(bytes>2*1024*1024)fail('Request exceeds limit',413);text+=chunk;}try{return JSON.parse(text);}catch{fail('Invalid JSON',400);}}
  const server=http.createServer(async(req,res)=>{try{
   res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-  const url=new URL(req.url,origin);if(req.headers.host!==new URL(origin).host)fail('Unexpected host',403);
+  const requestOrigin=hosts.get(req.headers.host);if(!requestOrigin)fail('Unexpected host',403);const url=new URL(req.url,requestOrigin);
   if(req.method==='GET'&&url.pathname==='/auth/shopify/callback'){if(!shopifyOAuth)fail('Shopify OAuth is not configured',503);const nonce=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('shuttle_shopify_state='))?.slice(22);await shopifyOAuth.callback(url.searchParams,nonce);res.setHeader('Set-Cookie','shuttle_shopify_state=; HttpOnly; SameSite=Lax; Path=/auth/shopify; Max-Age=0');res.writeHead(302,{Location:'/#home'});return res.end();}
   if(url.pathname==='/health')return json(res,200,{ok:true,mode:demo?'test':'configured',carrier:provider.disabled?'disconnected':provider instanceof MockCarrier?'mock':'parsel'});
   if(req.method==='GET'&&url.pathname==='/auth/config')return json(res,200,{provider:supabaseAuth?'supabase':'local',configured:supabaseAuth?supabaseAuth.configured():true});
   if(supabaseAuth&&req.method==='GET'&&['/setup','/accept'].includes(url.pathname)){res.writeHead(302,{Location:'/login'});return res.end();}
   if(url.pathname==='/favicon.ico'){res.writeHead(204);return res.end();}
   if(req.method==='POST'&&url.pathname==='/auth/login'){
-   if(req.headers.origin!==origin)fail('Same-origin login required',403);
-   const b=await body(req),session=await (supabaseAuth?supabaseAuth.login.bind(supabaseAuth):login)(store,b.email,b.password,serverless?String(req.headers['x-forwarded-for']||req.socket?.remoteAddress||'unknown').split(',')[0]:req.socket.remoteAddress);res.setHeader('Set-Cookie',`shuttle_session=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${session.maxAge||28800}${origin.startsWith('https:')?'; Secure':''}`);return json(res,200,{user:session.user});
+   if(req.headers.origin!==requestOrigin)fail('Same-origin login required',403);
+   const b=await body(req),session=await (supabaseAuth?supabaseAuth.login.bind(supabaseAuth):login)(store,b.email,b.password,serverless?String(req.headers['x-forwarded-for']||req.socket?.remoteAddress||'unknown').split(',')[0]:req.socket.remoteAddress);res.setHeader('Set-Cookie',`shuttle_session=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${session.maxAge||28800}${requestOrigin.startsWith('https:')?'; Secure':''}`);return json(res,200,{user:session.user});
   }
   const bearer=String(req.headers.authorization||'').replace(/^Bearer /,'');
   if(req.method==='POST'&&['/auth/bootstrap','/auth/accept'].includes(url.pathname)){
    if(supabaseAuth)fail('Account passwords are managed in Supabase Authentication. Sign in using your verified Supabase account.',409);
-   if(req.headers.origin!==origin)fail('Same-origin account request required',403);const b=await body(req);
+   if(req.headers.origin!==requestOrigin)fail('Same-origin account request required',403);const b=await body(req);
    const result=url.pathname==='/auth/bootstrap'?await bootstrapOwner(store,{...b,token:bearer},{setupToken,ownerEmail}):await acceptInvitation(store,b);return json(res,200,result);
   }
   const publicAccountFiles={'/setup':'setup.html','/accept':'accept.html','/account-setup.js':'account-setup.js','/account.css':'account.css'};
@@ -70,11 +72,11 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
   if(url.pathname==='/login'){res.writeHead(302,{Location:'/'});return res.end();}
   const user=auth.user;
   if(req.method==='POST'){
-   if(req.headers.origin!==origin||!secretEquals(req.headers['x-shuttle-token'],auth.session.csrf))fail('Reload SHUTTLE before submitting',403);const b=await body(req);let result;
+   if(req.headers.origin!==requestOrigin||!secretEquals(req.headers['x-shuttle-token'],auth.session.csrf))fail('Reload SHUTTLE before submitting',403);const b=await body(req);let result;
    if(provider.disabled&&['/api/warehouse/production-approve','/api/warehouse/book','/api/warehouse/approve-run','/api/warehouse/print','/api/warehouse/print-run','/api/warehouse/reprint','/api/warehouse/reconcile'].includes(url.pathname))provider.unavailable();
    if(shuttle2?.handles('POST',url.pathname)){requireRole(user,['owner']);const response=await shuttle2.request('POST',url.pathname+url.search,b);res.writeHead(response.status,{'Content-Type':response.type,'Cache-Control':'no-store'});return res.end(response.bytes);}
    if(url.pathname==='/auth/logout'){if(supabaseAuth)await supabaseAuth.logout(cookie);await store.transaction(s=>{s.sessions=s.sessions.filter(x=>x.hash!==digest(cookie));return true;});res.setHeader('Set-Cookie','shuttle_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
-   if(url.pathname==='/api/shopify/connect'){if(!shopifyOAuth)fail('Shopify OAuth is not configured',503);const link=await shopifyOAuth.start(user);res.setHeader('Set-Cookie',`shuttle_shopify_state=${link.nonce}; HttpOnly; SameSite=Lax; Path=/auth/shopify; Max-Age=600${origin.startsWith('https:')?'; Secure':''}`);return json(res,200,{url:link.url});}
+   if(url.pathname==='/api/shopify/connect'){if(!shopifyOAuth)fail('Shopify OAuth is not configured',503);const link=await shopifyOAuth.start(user);res.setHeader('Set-Cookie',`shuttle_shopify_state=${link.nonce}; HttpOnly; SameSite=Lax; Path=/auth/shopify; Max-Age=600${requestOrigin.startsWith('https:')?'; Secure':''}`);return json(res,200,{url:link.url});}
    if(url.pathname==='/api/team/invite')result=supabaseAuth?await authorizeSupabaseStaff(store,user,b):await inviteUser(store,user,b,origin);
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
    else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
@@ -137,11 +139,11 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
  return {server,store,handler:server.listeners('request')[0]};
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
- const origin=process.env.SHUTTLE_ORIGIN||'http://127.0.0.1:43841',demo=process.env.SHUTTLE_DEMO==='1';
+ const port=Number(process.env.PORT||43841),{canonical:origin,allowed:allowedOrigins}=resolveOrigins(process.env,{port}),demo=process.env.SHUTTLE_DEMO==='1';
  if(process.env.NODE_ENV==='production'&&(!origin.startsWith('https:')||!process.env.DATABASE_URL))throw Error('Production requires HTTPS origin and PostgreSQL');
  const provider=demo?new MockCarrier():shippingProvider(process.env);
  const oauth=process.env.GMAIL_OAUTH_TOKEN_FILE?JSON.parse(await fs.readFile(process.env.GMAIL_OAUTH_TOKEN_FILE,'utf8')):{};
  const gmail=new GmailClient({clientId:process.env.GMAIL_CLIENT_ID,clientSecret:process.env.GMAIL_CLIENT_SECRET,refreshToken:oauth.refreshToken||process.env.GMAIL_REFRESH_TOKEN,mailbox:'info@rugtomize.co'});
  const shopify=!demo&&process.env.SHOPIFY_TAG_SYNC==='1'?new ShopifyStatusClient({shop:process.env.SHOPIFY_STORE,token:process.env.SHOPIFY_ADMIN_TOKEN}):null;
- const {server}=await createServer({origin,demo,provider,shopify,gmail,emailSendingEnabled:process.env.GMAIL_LIVE_SEND==='1',attachmentRoot:process.env.SHUTTLE_ARTWORK_ROOT,stationToken:process.env.SHUTTLE_STATION_TOKEN,workflowToken:process.env.SHUTTLE_WORKFLOW_TOKEN});server.listen(Number(process.env.PORT||43841),process.env.SHUTTLE_BIND||'127.0.0.1',()=>console.log('SHUTTLE migration preview: '+origin));
+ const {server}=await createServer({origin,allowedOrigins,demo,provider,shopify,gmail,emailSendingEnabled:process.env.GMAIL_LIVE_SEND==='1',attachmentRoot:process.env.SHUTTLE_ARTWORK_ROOT,stationToken:process.env.SHUTTLE_STATION_TOKEN,workflowToken:process.env.SHUTTLE_WORKFLOW_TOKEN});server.listen(port,process.env.SHUTTLE_BIND||'127.0.0.1',()=>console.log('SHUTTLE migration preview: '+origin));
 }

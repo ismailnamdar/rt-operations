@@ -1,4 +1,5 @@
 import {ShopifyOAuth} from './shopify-oauth.mjs';
+import {localOrigins} from './origins.mjs';
 import {createShopifyConnection} from './shopify-connection.mjs';
 import {syncPaidShippingOrders,importLatestOrders,refreshRecentOrders,syncChangedOrders,processShopifyUpdates} from './shopify-orders.mjs';
 // Non-demo local launcher. Optional credentials file is private and ignored by Git.
@@ -10,7 +11,8 @@ const store=await createStore({file:path.join(root,'data','local-live.json'),dat
 // Import genuine cached folder membership only when no shared database is configured.
 if(!process.env.DATABASE_URL){try{const inventory=JSON.parse(await fs.readFile(path.join(root,'data','drive-production-inventory.json'),'utf8'));await store.transaction(s=>importDriveProduction(s,inventory));}catch(e){if(e.code!=='ENOENT')throw e;}}
 const supabaseAuth=new SupabaseAuth({url:process.env.SUPABASE_URL,key:process.env.SUPABASE_PUBLISHABLE_KEY||process.env.SUPABASE_ANON_KEY,ownerEmail:process.env.SHUTTLE_OWNER_EMAIL||'info@rugtomize.co'});
-const origin='http://127.0.0.1:43841';const shopifyOAuth=new ShopifyOAuth({env:process.env,store,origin}),client=createShopifyConnection({...process.env,SHOPIFY_AUTH_MODE:'oauth',SHUTTLE_ORIGIN:origin},{store});const {server}=await createServer({shopifyOAuth,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?()=>syncChangedOrders({store,client,pages:2}):null,store,origin,demo:false,supabaseAuth,provider:new DisabledCarrier(),drivePreviewDir:path.join(root,'data','drive-previews'),gmail:null,emailSendingEnabled:false});
+// Always local: ignore any deployed SHUTTLE_ORIGIN copied into the private env file.
+const allowedOrigins=localOrigins(43841),origin=allowedOrigins[0];const shopifyOAuth=new ShopifyOAuth({env:process.env,store,origin}),client=createShopifyConnection({...process.env,SHOPIFY_AUTH_MODE:'oauth'},{store,origin});const {server}=await createServer({allowedOrigins,shopifyOAuth,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?()=>syncChangedOrders({store,client,pages:2}):null,store,origin,demo:false,supabaseAuth,provider:new DisabledCarrier(),drivePreviewDir:path.join(root,'data','drive-previews'),gmail:null,emailSendingEnabled:false});
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'Local SHUTTLE port is already in use.':'Local SHUTTLE could not start.');process.exitCode=1;});server.listen(43841,'127.0.0.1',()=>console.log('SHUTTLE non-demo local: '+origin+' · Supabase Auth '+(supabaseAuth.configured()?'configured (sign-in still needs verification)':'awaiting configuration')+' · shipping disconnected · no demo accounts seeded'));
 
 // Read-only local synchronization. One store instance serializes UI and worker writes.
