@@ -59,6 +59,7 @@ Required:
 |---|---|
 | `SHUTTLE_ORIGIN` | `https://YOUR-PROJECT.vercel.app` |
 | `DATABASE_URL` | Private Supabase transaction-pooler connection |
+| `DATABASE_CA_CERT` | Supabase SSL certificate (PEM text from Database Settings → SSL Configuration); enables verified TLS |
 | `CRON_SECRET` | Random secret, at least 32 characters |
 | `SHUTTLE_SETUP_TOKEN` | Different random secret, at least 32 characters |
 | `SHUTTLE_OWNER_EMAIL` | `info@rugtomize.co` |
