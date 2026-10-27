@@ -2,9 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 export const blank = () => ({version:1,revision:0,users:[],sessions:[],intents:[],printJobs:[],jobs:[],events:[],settings:{upcomingProductionRunId:'1nOvYd0k_GgVfUcRVckBpMG1NvHVTiqgC',autoPrintUPS:true,autoPrintFedEx:true},snapshot:{results:{review:[],questions:[],gallery:[],history:[],alerts:[],updatedAt:new Date().toISOString(),sourceLabel:'Hosted migration — no live accounts connected'},runs:[],pipeline:{orders:[]},unfulfilled:{orders:[],inventoryComplete:false},schedule:{days:[],version:'initial'},expedited:{orders:[]},mockupBatches:{batches:[]},emailTemplates:[],lukasTodos:[]}});
-export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/state.json',databaseUrl=process.env.DATABASE_URL,schema=null}={}) {
+export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/state.json',databaseUrl=process.env.DATABASE_URL,databaseCa=process.env.DATABASE_CA_CERT,schema=null}={}) {
   if(databaseUrl){
-    const {Pool}=await import('pg');const pool=new Pool({connectionString:databaseUrl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000});
+    // A provided CA enforces verified TLS; URL ssl* parameters would otherwise override it in pg.
+    let connectionString=databaseUrl,ssl;if(databaseCa){const url=new URL(databaseUrl);for(const k of [...url.searchParams.keys()])if(k.startsWith('ssl'))url.searchParams.delete(k);connectionString=url.href;ssl={ca:databaseCa.replace(/\\n/g,'\n'),rejectUnauthorized:true};}
+    const {Pool}=await import('pg');const pool=new Pool({connectionString,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000});
     if(schema&&!/^[a-z][a-z0-9_]*$/.test(schema))throw Error('Invalid database schema');
     if(schema)await pool.query('CREATE SCHEMA IF NOT EXISTS '+schema);
     const table=schema?schema+'.shuttle_state':'shuttle_state';

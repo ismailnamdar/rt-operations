@@ -11,3 +11,17 @@ test('paginated latest-order import stops at 500 and retains old records',async(
  const {importLatestOrders}=await import('../app/shopify-orders.mjs');const receipt=await importLatestOrders({store,client,pages:20});assert.equal(receipt.imported,500);assert.equal(requests,10);assert.equal((await store.read()).snapshot.pipeline.orders.length,501);await importLatestOrders({store,client,pages:20});assert.equal(requests,10);
  }finally{await store.close();await fs.rm(dir,{recursive:true,force:true});}
 });
+
+test('commerce mapping supplies UI fields without inventing workflow and ignores stale updates',()=>{
+ const s=blank();mergeShopifyOrders(s,[{...order,updatedAt:'2026-10-26T12:00:00Z',displayFulfillmentStatus:'FULFILLED'}]);
+ const row=s.snapshot.unfulfilled.orders[0];assert.equal(row.email,order.email);assert.equal(row.id,order.id);assert.equal(row.financialStatus,'PAID');assert.equal(row.fulfillmentStatus,'FULFILLED');assert.equal(row.category,undefined);assert.equal(row.productionStage,undefined);
+ mergeShopifyOrders(s,[{...order,updatedAt:'2026-10-25T12:00:00Z'}]);assert.equal(s.snapshot.unfulfilled.orders[0].fulfillmentStatus,'FULFILLED');
+});
+test('incremental sync resumes its fixed window after failure, catches older updates, and preserves workflow',async()=>{
+ const {syncChangedOrders}=await import('../app/shopify-orders.mjs');let s=blank();s.shopifyOrders={'123':order};s.snapshot.pipeline.orders=[{order:'123',previewUrls:['keep'],productionStage:'in production'}];
+ const store={read:async()=>structuredClone(s),transaction:async fn=>fn(s)};let fail=false;const queries=[];
+ const client={request:async(_query,v)=>{queries.push(v);if(fail)throw Error('transient');return {orders:{nodes:[{...order,updatedAt:'2026-10-26T12:00:00Z',displayFulfillmentStatus:'FULFILLED'}],pageInfo:{hasNextPage:!v.after,endCursor:'page2'}}};}};
+ const now=Date.parse('2026-10-26T13:00:00Z');await syncChangedOrders({store,client,now});const window=structuredClone(s.shopifySync.window);assert.equal(window.cursor,'page2');
+ fail=true;await assert.rejects(syncChangedOrders({store,client,now:now+60000}),/transient/);assert.deepEqual(s.shopifySync.window,window);assert.equal(s.shopifySync.lease,undefined);
+ fail=false;await syncChangedOrders({store,client,now:now+120000});assert.equal(queries[2].query,queries[0].query);assert.equal(queries[2].after,'page2');assert.equal(s.shopifySync.status,'current');assert.equal(s.shopifySync.window,undefined);assert.equal(s.snapshot.pipeline.orders[0].productionStage,'in production');assert.deepEqual(s.snapshot.pipeline.orders[0].previewUrls,['keep']);
+});

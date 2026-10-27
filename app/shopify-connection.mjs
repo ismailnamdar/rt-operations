@@ -1,8 +1,10 @@
+import {ShopifyOAuth} from './shopify-oauth.mjs';
 import {ShopifyStatusClient} from './shopify-status.mjs';
 // A merchant-owned app in the same Shopify organization can use this grant.
-export function createShopifyConnection(env=process.env,{fetchImpl=fetch}={}){
+export function createShopifyConnection(env=process.env,{fetchImpl=fetch,store=null}={}){
  if(!env.SHOPIFY_STORE)return null;
  const client=new ShopifyStatusClient({shop:env.SHOPIFY_STORE,token:env.SHOPIFY_ADMIN_TOKEN,fetchImpl});
+ if(env.SHOPIFY_AUTH_MODE==='oauth'){if(!store)throw Error('Shopify OAuth requires durable storage');const oauth=new ShopifyOAuth({env,store,origin:env.SHUTTLE_ORIGIN,fetchImpl});client.accessToken=()=>oauth.accessToken();return client;}
  let cached=null,pending=null;
  client.accessToken=async()=>{
   if(env.SHOPIFY_ADMIN_TOKEN)return env.SHOPIFY_ADMIN_TOKEN;

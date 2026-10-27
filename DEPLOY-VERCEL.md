@@ -1,3 +1,18 @@
+# Supabase Auth update — staff sign-in
+
+This update supersedes the custom-password owner setup and invitation steps below. Hosted SHUTTLE now uses Supabase email/password authentication, verified server-side on protected requests. Old local-password sessions cannot bypass Supabase. The local demo remains explicitly separate.
+
+1. In your existing Supabase project, find the project URL and publishable key. Save them in Vercel as `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`. An existing anon key can be supplied as `SUPABASE_ANON_KEY` for compatibility. Never use a service-role key for this login flow.
+2. Retain `DATABASE_URL` for private server-side workflow persistence. Auth keys do not replace the database connection.
+3. In Supabase Authentication, disable public signups for this staff-only app. Create/verify the initial owner identity `info@rugtomize.co` using the dashboard's supported user setup flow. Keep passwords private. SHUTTLE grants the configured owner email initial owner access only when no owner already exists. Existing users retain their app roles; a disabled user cannot log in.
+4. Redeploy only after credentials and owner access are ready. Without Auth configuration, login fails closed rather than falling back to demo or custom passwords.
+5. To add teammates, authorize their exact work email and role from SHUTTLE Team accounts, then provision that same verified identity/password in Supabase Authentication → Users. Existing legacy passwords do not migrate. Password setup/recovery is currently managed in Supabase; the old SHUTTLE reset-link route is disabled in this mode.
+6. Test owner/warehouse/viewer sign-in, authorization and logout. Current sessions last up to one hour (or the provider's shorter lifetime), then require sign-in again. Background token refresh and self-service recovery UI are not included in this first adapter.
+
+No Supabase project, auth user, password, policy or existing database record is changed by preparing this source update. The application binds verified Supabase identities to existing SHUTTLE records without replacing workflow data.
+
+---
+
 # SHUTTLE on Vercel — Rugtomize
 
 ## October 16 interface merge
@@ -44,6 +59,7 @@ Required:
 |---|---|
 | `SHUTTLE_ORIGIN` | `https://YOUR-PROJECT.vercel.app` |
 | `DATABASE_URL` | Private Supabase transaction-pooler connection |
+| `DATABASE_CA_CERT` | Supabase SSL certificate (PEM text from Database Settings → SSL Configuration); enables verified TLS |
 | `CRON_SECRET` | Random secret, at least 32 characters |
 | `SHUTTLE_SETUP_TOKEN` | Different random secret, at least 32 characters |
 | `SHUTTLE_OWNER_EMAIL` | `info@rugtomize.co` |
@@ -130,3 +146,54 @@ Authorize `info@rugtomize.co` with Google Drive write permission using connectio
 
 ## October 22 update — Parsel is optional and disconnected by default
 SHUTTLE initializes without any Parsel token, URL or shipping settings. Leave `PARSEL_ENABLED` unset or `0`. Existing Parsel environment values are ignored until explicitly enabled. Booking, reconciliation, label retrieval and print requests cannot execute while disconnected. Existing orders, artwork, production records and shipping history are preserved. To configure later, explicitly set `PARSEL_ENABLED=1` and private credentials; live purchases remain disabled pending integration validation. Supabase, authentication and the relevant Google/Shopify connections retain their own setup requirements. This release includes the combined Mock-ups list with one-click Approve & send / Redo. Hosted GOAT processing still requires a hosted worker; the local SHUTTLE bridge is not a Vercel worker.
+
+## Shopify authorization-code flow (apps outside the store-owning organization)
+Set `SHOPIFY_AUTH_MODE=oauth`, retain the verified `SHOPIFY_STORE` and app client credentials, and initially request only `SHOPIFY_SCOPES=read_orders`. Generate a private base64 32-byte `SHOPIFY_TOKEN_ENCRYPTION_KEY` and store it server-side; keep it stable across redeployments. This key encrypts OAuth tokens at rest. Never commit credentials, token values or the encryption key.
+
+In the Shopify app's released configuration, add exactly `https://YOUR-SHUTTLE-HOST/auth/shopify/callback` to allowed redirect URLs. For local testing the app must accept the exact local callback `http://127.0.0.1:43841/auth/shopify/callback`; if Shopify requires HTTPS, use the deployed HTTPS callback instead of bypassing browser security. The app distribution configuration must permit installation on the intended store.
+
+Sign into SHUTTLE as Owner and click Connect Shopify. This creates a ten-minute, single-use, browser-bound state and redirects to the fixed configured store. The store owner reviews and approves Shopify's requested access. The callback verifies shop identity, timestamp, state cookie, owner eligibility and Shopify HMAC, exchanges the code server-side and persists encrypted credentials. No order writes occur during this flow. Import orders separately after connection succeeds.
+
+Expired offline tokens currently require reconnecting; background token refresh is not implemented in this adapter. A pending/failed/uncertain exchange requires a fresh Connect Shopify attempt rather than replaying the old callback. Shopify scopes and app distribution remain administrator prerequisites; code alone does not grant store access.
+
+## October 26 live synchronization readiness
+
+The non-demo local launcher now polls Shopify every 60 seconds while its process and computer are running. It uses bounded UPDATED_AT windows, persisted pagination, a five-minute overlap, and a single sync lease. It does not send mail, change Shopify, or buy shipping labels. Initial catch-up can take multiple cycles. Provider outages, search-index delays, inaccessible older orders, or expired authorization can delay results; the UI reports the last successful source check separately from Gmail/agent connectivity.
+
+On Vercel, the existing protected minute cron advances order import, changed-order catch-up, and signed webhook receipts. The minute schedule requires a Vercel plan that permits that frequency. A shared private DATABASE_URL is mandatory; local-file state is not deployed or silently substituted. Existing Supabase tables are preserved; SHUTTLE uses its separate shuttle_hosted schema. Before switching, preserve the current local workflow data through an explicit migration; do not upload private data or local.env to GitHub. Authorize Shopify again for the exact HTTPS deployment origin using the same app and encryption key. Verify all of this before retiring the local process.
+
+Configure orders/create, orders/updated, orders/fulfilled and app/uninstalled deliveries for https://YOUR-ACTUAL-DEPLOYMENT/api/shopify/webhook. The receiver verifies original-body HMAC and shop identity, deduplicates webhook IDs and durably queues processing. It does not register subscriptions automatically. Confirm a genuine delivery, processing receipt, and corresponding interface update after deployment. Fallback polling covers missed accessible order changes. An imported Shopify fulfillment is not carrier acceptance or proof of delivery; workflow stages require their own evidence.
+
+### Parsel and business-rule audit: blocked for live purchases
+
+Local audit found PARSEL_TOKEN and enablement absent. Vercel secrets have not been inspected. The existing provider is deliberately initialized with liveBooking:false and lacks verifyCurrent; credentials alone do not complete shipping readiness. Use scripts/check-parsel.mjs for a read-only credential check after saving a private token. A successful read does not prove write scopes, rate availability, cancellation, ZPL compatibility or printing.
+
+Preserved gates include fixed approved service/rate and spending ceiling, paid/QC/packing evidence, duplicate purchase locks, uncertain-write reconciliation, and separate print-request/spool receipts. Drive redo move/rename and fresh metadata verification are implemented behind Drive authorization. Current local data is cached artwork inventory, not a configured live Drive sync.
+
+Remaining release blockers: validated carrier field limits including UPS company 34 characters; order-wide over-$100 UPS Ground routing; category-wide prescan and numerically interleaved new/reused/redo printing; fresh provider-backed approval/payment/address/deadline/package verification; mandatory actual Shopify fulfillment/tracking verification after expedited booking; Parsel tracking webhook/polling with all-package acceptance/delivery; repeat-redo owner approval and exact physical-unit mappings; 8 AM redo hold release with expedited owner review and post-carrier-acceptance replacement decisions. Existing tests do not establish these missing integrations.
+
+The old new-quote helper now applies the October 26 $48.53 minimum proportionally after the saved relative markup. It never mutates prior quotes. End-to-end customer quote generation is not connected: it must offer only verified overnight/two-day deadline-compatible options and display estimated arrival date/time/destination timezone and price, keeping service names internal.
+
+### Parsel read-only verification — October 26
+
+After privately configuring the token, live shipment listing, shipment detail, label detail and tracking reads succeeded. Four existing UPS labels were examined; one was VOIDED. An existing unaccepted UPS label downloaded from the observed easypost-files.s3.us-west-2.amazonaws.com host and was identified as PNG by its actual bytes. This is not a ZPL, FedEx, rate-purchase, cancellation, or physical-printer test. No shipment draft, purchase, Shopify write or print was performed.
+
+The adapter now rejects incomplete API success envelopes, unverified/voided/accepted/delivered label reuse, mismatched service/tracking, and mislabeled printer formats. It detects PDF/PNG/ZPL bytes and never defaults an undeclared label to PDF. Automatic Windows station delivery requires actual ZPL; browser retrieval serves PNG and PDF with their correct MIME types and extensions. A missing carrier ship date now blocks preflight rather than silently satisfying the handoff check. The live shipment samples omitted ship_date: verify how the provider persists/returns the intended handoff date before enabling purchase.
+
+The token is only in ignored local configuration. Local live launcher shipping remains disabled; adding a token does not establish current prescan evidence, write permission or production purchase approval. Further pilot setup needs a chosen Pro run, confirmed sender/return address, approved package measurements, and the Windows print test. A token-read test cannot certify the full historical Label Booker workflow.
+
+### Paid Shopify shipping → next-production priority
+
+Active nonzero Shopify shipping charges now populate the existing expedited queue. The adapter uses current discounted/refunded shipping amounts, ignores removed lines, and preserves SHUTTLE artwork, deadline and hold evidence. Positive-price shipping selections with unresolved payment remain visible as payment-review cases; they are not payment-verified or purchase-eligible. Free, removed, cancelled, refunded and fulfilled automatic memberships are hidden without deleting the historical row. Existing independent SHUTTLE expedited cases remain preserved.
+
+A resumable initial scan of accessible unfulfilled orders backfills existing selections; subsequent signed webhooks and changed-order polling keep them current. Shopify's app-access window still limits historical coverage. The Home priority table and expedited production filter include paid selections even when no delivery date/calendar window exists. Missing deadlines stay flagged and are not counted twice in the chart. No shipping selection alone approves customer artwork, clears a hold, buys a label, or changes Shopify.
+
+## Vercel webhook activation (prepared; not active locally)
+
+Keep local minute polling until the public deployment and shared database are verified. The canonical receiver is SHUTTLE_ORIGIN + /api/shopify/webhook. No temporary tunnel is required or created.
+
+Recommended app-owned setup: use SHOPIFY_WEBHOOK_SOURCE=app and the same private SHOPIFY_CLIENT_SECRET used by the installed app. Once deployed and authorized, the SHUTTLE owner may POST /api/shopify/webhooks/setup with their authenticated session, exact Origin, and X-Shuttle-Token CSRF header. This registers/reuses six exact-endpoint subscriptions: orders/create, orders/updated, orders/paid, orders/cancelled, orders/fulfilled, app/uninstalled. Registration requests only the payload id; the worker fetches current order facts from Shopify. The action never deletes other subscriptions. Uncertain registration is reconciled by re-listing subscriptions on the next attempt; it never blindly repeats a successful creation.
+
+Manual Shopify Admin Notifications setup is an alternative, not an additional required path. For those subscriptions set SHOPIFY_WEBHOOK_SOURCE=manual and privately configure SHOPIFY_WEBHOOK_SECRET from that admin setup. The receiver uses only the selected signing source; it does not silently fall back between app and manual keys. Do not mix differently signed deliveries on this single endpoint. Keep the app's webhook API version at the tested 2026-10 version.
+
+The receiver validates shop identity, topic, original-body HMAC, body size and order identity, deduplicates deliveries and acknowledges only after durable storage. Failed persistence returns 503 for provider retry. Cron re-fetches current Shopify facts, applies the same paid-shipping membership rules, and preserves artwork/approval/hold state. It does not infer carrier acceptance from fulfillment or authorize sends/purchases. The minute worker and overlap polling remain the recovery path for delayed/missed events. A configured subscription is not verified delivery: after activation, confirm a real provider delivery receipt, worker completion, and the matching interface update. Local tests simulate these flows; no actual subscription or public delivery has been created during preparation.

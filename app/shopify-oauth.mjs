@@ -1,0 +1,23 @@
+import {createHmac,randomBytes,createCipheriv,createDecipheriv} from 'node:crypto';
+import {digest,secretEquals,requireRole} from './auth.mjs';
+const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
+export class ShopifyOAuth{
+ constructor({env,store,origin,fetchImpl=fetch}){Object.assign(this,{env,store,origin,fetch:fetchImpl});}
+ key(){const key=Buffer.from(this.env.SHOPIFY_TOKEN_ENCRYPTION_KEY||'','base64');if(key.length!==32)fail('Configure the private Shopify token encryption key',503);return key;}
+ seal(value){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',this.key(),iv),data=Buffer.concat([cipher.update(JSON.stringify(value),'utf8'),cipher.final()]);return {iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:data.toString('base64')};}
+ unseal(value){const cipher=createDecipheriv('aes-256-gcm',this.key(),Buffer.from(value.iv,'base64'));cipher.setAuthTag(Buffer.from(value.tag,'base64'));return JSON.parse(Buffer.concat([cipher.update(Buffer.from(value.data,'base64')),cipher.final()]).toString('utf8'));}
+ shop(value){if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(value||'')||value!==this.env.SHOPIFY_STORE)fail('Authorize only the configured Shopify store');return value;}
+ async start(user){requireRole(user,['owner']);this.key();if(!this.env.SHOPIFY_CLIENT_ID||!this.env.SHOPIFY_CLIENT_SECRET)fail('Shopify app credentials are missing',503);const shop=this.shop(this.env.SHOPIFY_STORE),nonce=randomBytes(32).toString('hex');await this.store.transaction(s=>{s.shopifyOAuthStates=(s.shopifyOAuthStates||[]).filter(x=>x.expiresAt>Date.now());s.shopifyOAuthStates.push({hash:digest(nonce),actor:user.id,shop,expiresAt:Date.now()+600000});});const url=new URL('https://'+shop+'/admin/oauth/authorize');url.searchParams.set('client_id',this.env.SHOPIFY_CLIENT_ID);url.searchParams.set('scope',this.env.SHOPIFY_SCOPES||'read_orders');url.searchParams.set('redirect_uri',this.origin+'/auth/shopify/callback');url.searchParams.set('state',nonce);return {url:url.href,nonce};}
+ async callback(params,cookie){
+  for(const key of new Set(params.keys()))if(params.getAll(key).length!==1)fail('Duplicate OAuth parameter');
+  const shop=this.shop(params.get('shop')),nonce=params.get('state'),code=params.get('code'),signature=params.get('hmac'),timestamp=Number(params.get('timestamp'));
+  if(!nonce||!code||!secretEquals(nonce,cookie)||!timestamp||Math.abs(Date.now()/1000-timestamp)>600)fail('Shopify authorization expired or state did not match');
+  const message=[...params.entries()].filter(([k])=>k!=='hmac').sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,v])=>k+'='+v).join('&');
+  if(!secretEquals(createHmac('sha256',this.env.SHOPIFY_CLIENT_SECRET).update(message).digest('hex'),signature))fail('Shopify authorization signature is invalid',403);
+  await this.store.transaction(s=>{const pending=s.shopifyOAuthStates?.find(x=>x.hash===digest(nonce)&&x.shop===shop&&x.expiresAt>Date.now()&&!x.used);if(!pending||!s.users.some(u=>u.id===pending.actor&&u.role==='owner'&&!u.disabled))fail('Shopify authorization is not active',403);pending.used=true;});
+  const response=await this.fetch('https://'+shop+'/admin/oauth/access_token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id:this.env.SHOPIFY_CLIENT_ID,client_secret:this.env.SHOPIFY_CLIENT_SECRET,code}),redirect:'error',signal:AbortSignal.timeout(15000)});
+  if(!response.ok)fail('Shopify did not accept the authorization code. Start Connect Shopify again.',502);const token=await response.json();if(!token.access_token)fail('Shopify returned no access token',502);const scopes=String(token.scope||'').split(',');for(const scope of (this.env.SHOPIFY_SCOPES||'read_orders').split(','))if(!scopes.includes(scope))fail('Required Shopify scope was not approved',403);
+  await this.store.transaction(s=>{if(s.shopifyConnection?.shop&&s.shopifyConnection.shop!==shop)fail('Store identity conflicts with saved records',409);s.shopifyOAuth={shop,token:this.seal({accessToken:token.access_token,refreshToken:token.refresh_token||null}),expiresAt:token.expires_in?Date.now()+token.expires_in*1000:null,scopes,connectedAt:new Date().toISOString()};s.shopifyConnection={...s.shopifyConnection,shop,revoked:false};});return {ok:true};
+ }
+ async accessToken(){const s=await this.store.read(),saved=s.shopifyOAuth;if(!saved||saved.shop!==this.env.SHOPIFY_STORE||s.shopifyConnection?.revoked)fail('Connect Shopify from an owner account first',503);if(saved.expiresAt&&saved.expiresAt<Date.now()+60000)fail('Shopify authorization has expired; reconnect from the owner account',503);return this.unseal(saved.token).accessToken;}
+}
