@@ -23,7 +23,7 @@ import {saveReviews,approveReviews} from './reviews.mjs';
 import {GmailClient} from './gmail.mjs';
 import {processApprovedEmails,reconcileApprovedEmails} from './email-worker.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-export async function createServer({store,provider,origin='http://127.0.0.1:43841',stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null}={}){
+export async function createServer({store,provider,origin='http://127.0.0.1:43841',stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null,shopifyWebhookSetup=null}={}){
  store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=demo?new MockCarrier():new DisabledCarrier();const events=new Set();
  const files=['goat-output-model.js','control-center.js','app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
  const clientVersion=createHash('sha256').update((await Promise.all(files.map(n=>fs.readFile(path.join(here,'public',n))))).join('')).digest('hex').slice(0,16);
@@ -78,6 +78,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
    else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
    else if(url.pathname==='/api/drive/sync'){requireRole(user,['owner']);if(!drive)fail('Read-only Drive authorization is not configured',503);result=await drive.sync(store);}
+   else if(url.pathname==='/api/shopify/webhooks/setup'){requireRole(user,['owner']);if(!shopifyWebhookSetup)fail('Webhook registration requires the deployed app and app signing mode',503);result=await shopifyWebhookSetup(user);}
    else if(url.pathname==='/api/shopify/refresh'){requireRole(user,['owner']);if(!shopifyRefresh)fail('Shopify connection is not configured',503);result=await shopifyRefresh();}
    else if(url.pathname==='/api/shopify/import'){requireRole(user,['owner']);if(!shopifyImport)fail('Shopify connection is not configured',503);result=await shopifyImport();}
    else if(url.pathname==='/api/warehouse/import')result=await store.transaction(s=>importIntent(s,user,b));
