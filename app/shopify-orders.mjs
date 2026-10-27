@@ -1,5 +1,5 @@
 // Shopify remains authoritative for current commerce facts; preserve workflow/artwork fields.
-export const ORDER_FIELDS=`id name email createdAt updatedAt cancelledAt displayFinancialStatus displayFulfillmentStatus tags lineItems(first: 100) { nodes { id title quantity variantTitle customAttributes { key value } } pageInfo { hasNextPage } }`;
+export const ORDER_FIELDS=`id name email createdAt updatedAt cancelledAt displayFinancialStatus displayFulfillmentStatus tags shippingLines(first: 100) { nodes { id title code isRemoved currentDiscountedPriceSet { shopMoney { amount currencyCode } } } pageInfo { hasNextPage } } lineItems(first: 100) { nodes { id title quantity variantTitle customAttributes { key value } } pageInfo { hasNextPage } }`;
 export const ORDERS_QUERY=`query ShuttleOrders($after: String) { orders(first: 50, after: $after, sortKey: CREATED_AT, reverse: true) { nodes { ${ORDER_FIELDS} } pageInfo { hasNextPage endCursor } } }`;
 export const ORDER_QUERY=`query ShuttleOrder($id: ID!) { order(id: $id) { ${ORDER_FIELDS} } }`;
 export function mergeShopifyOrders(s,orders,{reset=false,cursor=null,complete=false,trackImport=true}={}){
@@ -10,6 +10,7 @@ export function mergeShopifyOrders(s,orders,{reset=false,cursor=null,complete=fa
   const prior=s.shopifyOrderBindings[number];if(prior&&prior.id!==order.id)throw Error('Conflicting Shopify order identity');
   if(s.shopifyOrders[number]?.updatedAt>order.updatedAt)continue;
   s.shopifyOrders[number]={...order,checkedAt:now};s.shopifyOrderBindings[number]={id:order.id,verified:true,verifiedAt:now};
+  mergePaidShipping(s,order,number,now);
   for(const key of ['pipeline','unfulfilled']){
    s.snapshot[key]||={orders:[]};s.snapshot[key].orders||=[];
    const rows=s.snapshot[key].orders,old=rows.find(r=>String(r.order)===number),facts={order:number,id:order.id,shopifyOrderId:order.id,email:order.email,financialStatus:order.displayFinancialStatus,cancelledAt:order.cancelledAt||null,customer:order.customer?.displayName||order.email||'Customer',customerEmail:order.email,createdAt:order.createdAt,shopifyUpdatedAt:order.updatedAt,paymentStatus:order.displayFinancialStatus,fulfillmentStatus:order.displayFulfillmentStatus,shopifyTags:order.tags,shopifyLineItems:order.lineItems.nodes,shopifyLineItemsIncomplete:order.lineItems.pageInfo.hasNextPage,shopifyCheckedAt:now,checkedAt:now,requiredItems:order.lineItems.nodes.map(i=>({id:i.id,title:i.title,variant:i.variantTitle,quantity:i.quantity,attributes:i.customAttributes}))};
@@ -85,4 +86,31 @@ export async function syncChangedOrders({store,client,pages=1,now=Date.now()}){
   return {refreshed,status:(await store.read()).shopifySync.status};
  }catch(error){await store.transaction(s=>{if(s.shopifySync?.lease===lease){s.shopifySync.status='needs_attention';s.shopifySync.error='Shopify synchronization failed; its cursor is retained for retry.';}});throw error;}
  finally{await store.transaction(s=>{if(s.shopifySync?.lease===lease){delete s.shopifySync.lease;delete s.shopifySync.leaseUntil;if(s.shopifySync.status!=='needs_attention')delete s.shopifySync.error;}});}
+}
+
+export function mergePaidShipping(s,order,number,now=new Date().toISOString()){
+ if(!order.shippingLines?.nodes)return; // Missing scope/data is not evidence of free shipping.
+ const active=order.shippingLines.nodes.filter(l=>!l.isRemoved),paid=active.filter(l=>Number.isFinite(Number(l.currentDiscountedPriceSet?.shopMoney?.amount))&&Number(l.currentDiscountedPriceSet.shopMoney.amount)>0);
+ s.snapshot.expedited||={orders:[]};const rows=s.snapshot.expedited.orders;let row=rows.find(r=>String(r.order)===number);
+ const open=!order.cancelledAt&&order.displayFulfillmentStatus!=='FULFILLED'&&!['REFUNDED','VOIDED','EXPIRED'].includes(order.displayFinancialStatus);
+ if(!paid.length&&order.shippingLines.pageInfo?.hasNextPage)return;
+ if(!paid.length&&!row)return;
+ if(!row){row={order:number,shopifyPaidShippingManaged:true};rows.push(row);}
+ const selected=paid.length>0;
+ if(row.shopifyPaidShippingManaged)row.expeditedActive=selected&&open;
+ const verified=selected&&order.displayFinancialStatus==='PAID';
+ Object.assign(row,{customer:row.customer||order.email||'Customer',email:order.email,shopifyOrderId:order.id,fulfillmentStatus:order.displayFulfillmentStatus,cancelledAt:order.cancelledAt||null,shopifyPaidShippingSelected:selected,shopifyShippingCheckedAt:now,shopifyShippingLines:active,shopifyShippingIncomplete:order.shippingLines.pageInfo?.hasNextPage===true});
+ if(selected)Object.assign(row,{nextProductionRequired:true,shippingPaymentVerified:verified,shippingPaidCents:Math.round(paid.reduce((n,l)=>n+Number(l.currentDiscountedPriceSet.shopMoney.amount),0)*100),selectedService:paid.map(l=>l.title||l.code).join(' + '),shippingStatus:paid.map(l=>l.title||l.code).join(' + '),paymentStatus:verified?'Paid shipping · '+paid.map(l=>l.currentDiscountedPriceSet.shopMoney.currencyCode+' '+Number(l.currentDiscountedPriceSet.shopMoney.amount).toFixed(2)).join(' + '):'Paid service selected · payment review required',sourceNote:'Shopify shipping lines refreshed '+now+'. Paid selection prioritizes production; it does not establish artwork approval or authorize booking.'});
+ if(!row.nextAction||row.shopifyPaidShippingManaged)row.nextAction=selected?(verified?'Verify mock-up approval and artwork for next production':'Review payment and mock-up approval for next production'):'Paid shipping selection removed; review existing obligations';
+ s.snapshot.expedited.checkedAt=now;s.snapshot.expedited.partial=s.shopifyExpeditedScan?.status!=='complete';s.snapshot.expedited.coverage='Paid shipping selections from accessible Shopify orders, plus preserved SHUTTLE expedited cases. Artwork and deadlines require their own verified evidence.';
+}
+export const PAID_SHIPPING_QUERY=`query ShuttlePaidShipping($after:String){orders(first:50,after:$after,query:"-fulfillment_status:fulfilled",sortKey:CREATED_AT,reverse:true){nodes{${ORDER_FIELDS}}pageInfo{hasNextPage endCursor}}}`;
+export async function syncPaidShippingOrders({store,client,pages=1}){
+ let scan=(await store.read()).shopifyExpeditedScan;if(scan?.status==='complete')return scan;
+ for(let n=0;n<pages;n++){
+  const c=(await client.request(PAID_SHIPPING_QUERY,{after:scan?.cursor||null}))?.orders;
+  if(!c||!Array.isArray(c.nodes)||c.pageInfo.hasNextPage&&!c.pageInfo.endCursor)throw Error('Incomplete Shopify shipping page');
+  await store.transaction(s=>{if((s.shopifyExpeditedScan?.cursor||null)!==(scan?.cursor||null))throw Error('Shipping scan progressed elsewhere');mergeShopifyOrders(s,c.nodes,{trackImport:false});s.shopifyExpeditedScan={status:c.pageInfo.hasNextPage?'running':'complete',cursor:c.pageInfo.endCursor,scanned:(scan?.scanned||0)+c.nodes.length,checkedAt:new Date().toISOString()};s.snapshot.expedited||={orders:[]};s.snapshot.expedited.partial=c.pageInfo.hasNextPage;});
+  scan=(await store.read()).shopifyExpeditedScan;if(scan.status==='complete')break;
+ }return scan;
 }

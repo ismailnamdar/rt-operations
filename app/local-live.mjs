@@ -1,6 +1,6 @@
 import {ShopifyOAuth} from './shopify-oauth.mjs';
 import {createShopifyConnection} from './shopify-connection.mjs';
-import {importLatestOrders,refreshRecentOrders,syncChangedOrders,processShopifyUpdates} from './shopify-orders.mjs';
+import {syncPaidShippingOrders,importLatestOrders,refreshRecentOrders,syncChangedOrders,processShopifyUpdates} from './shopify-orders.mjs';
 // Non-demo local launcher. Optional credentials file is private and ignored by Git.
 import fs from 'node:fs/promises';import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {createStore} from './store.mjs';import {createServer} from './server.mjs';import {DisabledCarrier} from './shipping-provider.mjs';import {SupabaseAuth} from './supabase-auth.mjs';import {importDriveProduction} from './drive-production.mjs';
@@ -18,7 +18,7 @@ let syncing=false;
 async function syncShopify(){if(syncing||!client)return;syncing=true;try{
  const state=await store.read();if(!state.shopifyOAuth||state.shopifyConnection?.revoked)return;
  if(state.shopifyImport?.status!=='complete')await importLatestOrders({store,client,pages:1});
- else {await syncChangedOrders({store,client,pages:state.shopifySync?.lastSuccessAt?2:10});await processShopifyUpdates({store,client,limit:10});}
+ else {if(state.shopifyExpeditedScan?.status!=='complete')await syncPaidShippingOrders({store,client,pages:10});await syncChangedOrders({store,client,pages:state.shopifySync?.lastSuccessAt?2:10});await processShopifyUpdates({store,client,limit:10});}
 }catch{console.error('Shopify read synchronization needs attention; pending work is retained.');}finally{syncing=false;}}
 const syncTimer=setInterval(syncShopify,60000);syncTimer.unref();void syncShopify();
 server.on('close',()=>clearInterval(syncTimer));

@@ -1,3 +1,4 @@
+import {needsNextProduction} from './expedited-urgency.js';
 import {renderControlCenter} from './control-center.js';
 import {renderProduction as renderProductionPage} from './production-ui.js';
 import {renderMockupBatches} from './mockup-batches-ui.js';
@@ -40,7 +41,7 @@ function toast(message){if($('#detail-dialog').open){let note=$('#dialog-feedbac
 function route(){let view=location.hash.slice(1)||'home';if(view==='shipping'){view='calendar';history.replaceState(null,'','#calendar')}if(view==='gallery'){view='calendar';history.replaceState(null,'','#calendar')}if(!names[view])view='home';for(const v of $$('.view'))v.hidden=v.id!=='view-'+view;for(const a of $$('[data-nav]')){a.classList.toggle('active',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'calendar'}[view]||view));a.setAttribute('aria-current',a.dataset.nav===({expedited:'oldest',questions:'review',history:'agents',shipping:'calendar'}[view]||view)?'page':'false')}$('#breadcrumb-current').textContent=names[view];if(state)requestRender()}
 async function api(path,body){const res=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json','X-Shuttle-Token':csrf}:{},body:body?JSON.stringify(body):undefined});const data=await res.json();if(!res.ok)throw Error(data.error||'Request failed');return data}
 function pending(){return (state?.results.review||[]).filter(x=>x.status==='pending'&&!deletionsInFlight.has(x.id)&&!approvalReserved(x.id)&&!reviewInputReserved(x.id))}
-function render(){if(!state)return;if(state.expedited?.orders)state.expedited={...state.expedited,orders:state.expedited.orders.filter(row=>!(String(row.fulfillmentStatus||'').toUpperCase()==='FULFILLED'||(row.expeditedWithdrawal?.verified===true&&Boolean(row.expeditedWithdrawal?.messageId))))};deferredRender=false;const r=state.results;const active=state.runs.find(x=>['queued','running','dispatching'].includes(x.status));const latestWorkflow=visibleHistoryRuns().find(x=>['banda','complete','scan'].includes(x.mode));const blocked=!active&&latestWorkflow&&['needs_attention','failed','interrupted'].includes(latestWorkflow.status)?latestWorkflow:null;const online=state.connection.ready;$('#connection-label').textContent=!online?(state.hosted?'Email / agents offline':'Connection unavailable'):active?'Agent running':blocked?'Last run needs attention':'Ready to run';$('#connection-dot').classList.toggle('offline',!online||!!blocked);$('#footer-status').textContent=r.sourceLabel||'Updated '+new Date(r.updatedAt).toLocaleString();$('#review-count').textContent=pending().length;$('#question-count').textContent=r.questions.filter(x=>x.status==='pending').length;$('#oldest-count').textContent=unfulfilledRows().length;$('#expedited-count').textContent=(state.expedited?.orders||[]).length;$('#mockup-batches-count').textContent=(state.mockupBatches?.batches||[]).flatMap(b=>b.items||[]).filter(i=>!['sent','excluded'].includes(i.status)).length;
+function render(){if(!state)return;if(state.expedited?.orders)state.expedited={...state.expedited,orders:state.expedited.orders.filter(row=>row.expeditedActive!==false&&!row.cancelledAt&&!row.canceledAt&&!(String(row.fulfillmentStatus||'').toUpperCase()==='FULFILLED'||(row.expeditedWithdrawal?.verified===true&&Boolean(row.expeditedWithdrawal?.messageId))))};deferredRender=false;const r=state.results;const active=state.runs.find(x=>['queued','running','dispatching'].includes(x.status));const latestWorkflow=visibleHistoryRuns().find(x=>['banda','complete','scan'].includes(x.mode));const blocked=!active&&latestWorkflow&&['needs_attention','failed','interrupted'].includes(latestWorkflow.status)?latestWorkflow:null;const online=state.connection.ready;$('#connection-label').textContent=!online?(state.hosted?'Email / agents offline':'Connection unavailable'):active?'Agent running':blocked?'Last run needs attention':'Ready to run';$('#connection-dot').classList.toggle('offline',!online||!!blocked);$('#footer-status').textContent=r.sourceLabel||'Updated '+new Date(r.updatedAt).toLocaleString();$('#review-count').textContent=pending().length;$('#question-count').textContent=r.questions.filter(x=>x.status==='pending').length;$('#oldest-count').textContent=unfulfilledRows().length;$('#expedited-count').textContent=(state.expedited?.orders||[]).length;$('#mockup-batches-count').textContent=(state.mockupBatches?.batches||[]).flatMap(b=>b.items||[]).filter(i=>!['sent','excluded'].includes(i.status)).length;
 for(const b of $$('.run-button'))b.disabled=busy||!online;
 const banner=$('#run-banner');banner.hidden=!active&&!blocked&&online&&!state.connection.limitation;banner.classList.toggle('warn',!online||!!blocked);banner.replaceChildren();if(active){banner.append(el('strong','',active.title+' · '+active.status),el('span','',active.progress||'Waiting for the agent. Results will appear here.'))}else if(blocked){banner.append(el('strong','',blocked.title+' · Needs attention'),el('span','',blocked.summary||blocked.progress||'The last run did not finish. Check its history before retrying.'));const historyLink=el('a','secondary','View run history →');historyLink.href='#history';banner.append(historyLink);if(!online)banner.append(el('span','',state.connection.message));}else if(!online){banner.append(el('strong','','Run connection needs attention'),el('span','',state.connection.message));banner.append(button('Use local Codex workers','secondary',()=>action('/api/setup',{backend:'cli'},'Local workers enabled. Choose an agent to run.')))}else if(state.connection.limitation){banner.append(el('strong','','Local workers enabled'),el('span','',state.connection.limitation))}
 renderControlCenter(state,api,refresh,toast);const view=activeView();if(view==='home')renderHome();if(view==='mockups')renderMockupBatches(state,api,refresh,toast);if(view==='review')renderReview();if(view==='calendar'){renderCalendar();renderProductionPage(state,api,refresh,toast,'#production-run-content');}if(view==='expedited')renderExpedited();if(view==='questions')renderQuestions();if(view==='history')renderHistory();if(view==='oldest')renderPipeline();renderReceipt();renderLiveRuntime();lastContentVersion=contentVersion(state);lastRunVersion=JSON.stringify(state.runs);}
@@ -400,7 +401,7 @@ function expeditedProductionWindow(days=state.schedule?.days||[],today=localToda
  const end=new Date(start+'T12:00:00Z');end.setUTCDate(end.getUTCDate()+3);
  return {start,end:end.toISOString().slice(0,10),isToday:start===today};
 }
-function needsProduction(row,window){return !!(!row.productionHold&&window&&/^\d{4}-\d{2}-\d{2}$/.test(row.deadline||'')&&row.deadline>=window.start&&row.deadline<=window.end)}
+function needsProduction(row,window){return needsNextProduction(row,window)}
 function visibleExpeditedOrders(){
  const window=expeditedProductionWindow(),query=$('#expedited-search').value.trim().toLowerCase();
  return (state.expedited?.orders||[]).filter(row=>(expeditedFilter!=='production'||needsProduction(row,window))&&[row.order,row.customer,row.workflow,row.nextAction,row.deadlineText].join(' ').toLowerCase().includes(query));
@@ -783,20 +784,21 @@ async function deleteReviewItems(items){
 // Home uses the same saved records and calendar as the operational pages.
 function dashboardMetrics(snapshot,review,sendableIds,artworkIds,today){
  const unique=rows=>[...new Map(rows.filter(r=>r.order!=null).map(r=>[String(r.order),r])).values()];
- const open=r=>!['FULFILLED','CANCELLED','CANCELED'].includes(String(r.fulfillmentStatus||'').toUpperCase())&&!r.cancelledAt&&!r.canceledAt;
+ const open=r=>r.expeditedActive!==false&&!['FULFILLED','CANCELLED','CANCELED'].includes(String(r.fulfillmentStatus||'').toUpperCase())&&!r.cancelledAt&&!r.canceledAt;
  const expedited=unique((snapshot.expedited?.orders||[]).filter(open));
  const tracked=unique((snapshot.pipeline?.orders||[]).filter(r=>open(r)&&r.eligible!==false));
  const window=expeditedProductionWindow(snapshot.schedule?.days||[],today);
  const validDay=d=>/^\d{4}-\d{2}-\d{2}$/.test(d||'')&&!Number.isNaN(Date.parse(d+'T12:00:00Z'));
- const priority=expedited.filter(r=>needsProduction(r,window)).sort((a,b)=>a.deadline.localeCompare(b.deadline)||String(a.order).localeCompare(String(b.order)));
- const overdue=expedited.filter(r=>validDay(r.deadline)&&r.deadline<today).sort((a,b)=>a.deadline.localeCompare(b.deadline));
- const undated=expedited.filter(r=>!validDay(r.deadline));
+ const priority=expedited.filter(r=>needsProduction(r,window)).sort((a,b)=>(a.deadline||'9999').localeCompare(b.deadline||'9999')||String(a.order).localeCompare(String(b.order)));
+ const overdue=expedited.filter(r=>validDay(r.deadline)&&r.deadline<today).sort((a,b)=>(a.deadline||'9999').localeCompare(b.deadline||'9999'));
+ const missingDeadlines=expedited.filter(r=>!validDay(r.deadline));
+ const undated=missingDeadlines.filter(r=>!priority.includes(r));
  const later=expedited.filter(r=>validDay(r.deadline)&&r.deadline>=today&&!priority.includes(r));
  const artwork=review.filter(r=>artworkIds.has(r.id));
  const sendable=review.filter(r=>sendableIds.has(r.id)&&!artworkIds.has(r.id));
  const other=review.filter(r=>!artworkIds.has(r.id)&&!sendableIds.has(r.id));
  const ages=tracked.map(r=>({row:r,age:validDay((r.createdAt||'').slice(0,10))?Math.max(0,Math.floor((Date.parse(today+'T12:00:00Z')-Date.parse(r.createdAt.slice(0,10)+'T12:00:00Z'))/86400000)):null})).filter(r=>r.age!==null).sort((a,b)=>b.age-a.age);
- return {review,expedited,tracked,window,priority,overdue,undated,later,artwork,sendable,other,ages,oldest:ages[0]||null};
+ return {review,expedited,tracked,window,priority,overdue,undated,missingDeadlines,later,artwork,sendable,other,ages,oldest:ages[0]||null};
 }
 function homeLink(label,href,cls='text-button'){const a=el('a',cls,label);a.href=href;return a}
 function homeOpenReview(items,title){if(items.length)confirmApproval(items,title);else location.hash='review'}
@@ -833,7 +835,7 @@ function renderHome(){
   {label:'Review queue',value:m.review.length,note:'Open customer conversations',open:()=>{location.hash='review'}},
   {label:'Replies to send',value:m.sendable.length,note:'Awaiting your approval',open:()=>homeOpenReview(m.sendable,'Replies to send')},
   {label:'Proofs pending',value:m.artwork.length,note:'Updated artwork required',open:()=>homeOpenReview(m.artwork,'Proofs pending')},
-  {label:'Due next production',value:m.window?m.priority.length:'—',note:m.window?dayLabel(m.window.start,{month:'short',day:'numeric'})+'–'+dayLabel(m.window.end,{month:'short',day:'numeric'}):'Set a production date',open:()=>m.window?homeOpenExpedited(null,true):location.hash='calendar'},
+  {label:'Due next production',value:m.priority.length,note:m.window?dayLabel(m.window.start,{month:'short',day:'numeric'})+'–'+dayLabel(m.window.end,{month:'short',day:'numeric'}):'Set a production date',open:()=>homeOpenExpedited(null,true)},
   {label:'Overdue rush orders',value:m.overdue.length,note:'Past requested delivery date',tone:m.overdue.length?'danger':'',open:()=>homeShowOrders(m.overdue,'Overdue rush orders')},
   {label:'Runs needing attention',value:visibleHistoryRuns().filter(r=>['failed','interrupted','needs_attention'].includes(r.status)).length,note:'Recorded failures · view reasons',tone:failures.length?'danger':'',open:()=>{location.hash='history'}}
  ];
@@ -841,17 +843,17 @@ function renderHome(){
  $('#home-production-date').textContent=m.window?dayLabel(m.window.start,{weekday:'short',month:'short',day:'numeric'}):'No date scheduled';
  $('#home-production-window').textContent=m.window?'Delivery dates '+dayLabel(m.window.start,{month:'short',day:'numeric'})+'–'+dayLabel(m.window.end,{month:'short',day:'numeric'}):'Choose a production date in the calendar.';
  const exp=state.expedited||{};$('#home-expedited-coverage').textContent=(exp.partial?'Partial list · ':'')+(exp.checkedAt?'Checked '+new Date(exp.checkedAt).toLocaleString():'Not checked');
- $('#home-priority-count').textContent=m.window?m.priority.length+' order'+(m.priority.length===1?'':'s'):'';
+ $('#home-priority-count').textContent=m.priority.length+' order'+(m.priority.length===1?'':'s');
  const body=$('#home-priority-rows');body.replaceChildren(...m.priority.map(row=>{
   const tr=el('tr'),identity=el('td');identity.append(el('strong','','#'+row.order),el('small','',row.customer||'Customer'));
-  const deadline=el('td','home-deadline',dayLabel(row.deadline,{weekday:'short',month:'short',day:'numeric'}));
+  const deadline=el('td','home-deadline',row.deadline?dayLabel(row.deadline,{weekday:'short',month:'short',day:'numeric'}):'Date needed');
   const payment=el('td','home-payment',row.paymentStatus||row.quote||'Not verified');
   const next=el('td','home-next',row.nextAction||'Review order details.');
   const action=el('td');action.append(button('Open','secondary',()=>homeOpenExpedited(row.order)));tr.append(identity,deadline,payment,next,action);return tr;
  }));
  $('#home-priority-empty').hidden=!!m.priority.length;$('#home-priority-table').hidden=!m.priority.length;
  $('#home-priority-empty').textContent=!m.window?'Schedule the next production run.':'No recorded expedited deadlines in this production window.';
- const flags=$('#home-priority-flags');flags.replaceChildren();if(m.overdue.length)flags.append(button(m.overdue.length+' overdue deadlines','home-flag danger',()=>homeShowOrders(m.overdue,'Overdue rush orders')));if(m.undated.length)flags.append(button(m.undated.length+' missing delivery date'+(m.undated.length===1?'':'s'),'home-flag',()=>homeShowOrders(m.undated,'Delivery date needed')));
+ const flags=$('#home-priority-flags');flags.replaceChildren();if(m.overdue.length)flags.append(button(m.overdue.length+' overdue deadlines','home-flag danger',()=>homeShowOrders(m.overdue,'Overdue rush orders')));if(m.missingDeadlines.length)flags.append(button(m.missingDeadlines.length+' missing delivery date'+(m.missingDeadlines.length===1?'':'s'),'home-flag',()=>homeShowOrders(m.missingDeadlines,'Delivery date needed')));
  renderHomeDonut($('#home-review-chart'),[
   {label:'Replies to send',color:'#24775b',items:m.sendable,open:i=>homeOpenReview(i,'Replies to send')},
   {label:'Awaiting artwork',color:'#d2a347',items:m.artwork,open:i=>homeOpenReview(i,'Proofs pending')},
