@@ -16,7 +16,7 @@ export function validateDeployment(env){
  return url.origin;
 }
 export async function createVercelRuntime({env=process.env,store,client,authFetch=fetch}={}){
- const origin=validateDeployment(env);store||=await createStore({databaseUrl:env.DATABASE_URL,schema:'shuttle_hosted'});
+ const origin=validateDeployment(env);store||=await createStore({databaseUrl:env.DATABASE_URL,databaseCa:env.DATABASE_CA_CERT,schema:'shuttle_hosted'});
  client??=createShopifyConnection(env,{store});
  if(env.SHOPIFY_STORE)await store.transaction(s=>{if(s.shopifyConnection?.shop&&s.shopifyConnection.shop!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');s.shopifyConnection={...s.shopifyConnection,shop:env.SHOPIFY_STORE};});
  // Fail closed without live Parsel verification; never fall back to the mock buyer.
