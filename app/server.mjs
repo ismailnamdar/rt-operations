@@ -67,6 +67,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
   }
   const state=await store.read(),cookie=String(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('shuttle_session='))?.slice(16),localAuth=sessionFor(state,cookie),auth=supabaseAuth?await supabaseAuth.verify(localAuth,cookie):localAuth;
   if(!auth){if(url.pathname==='/login'||url.pathname==='/login.js'){const name=url.pathname==='/login'?'login.html':'login.js';res.writeHead(200,{'Content-Type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html','Cache-Control':'no-store'});return res.end(await fs.readFile(path.join(here,'public',name)));}if(url.pathname.startsWith('/api/'))fail('Sign in to SHUTTLE',401);res.writeHead(302,{Location:'/login'});return res.end();}
+  if(url.pathname==='/login'){res.writeHead(302,{Location:'/'});return res.end();}
   const user=auth.user;
   if(req.method==='POST'){
    if(req.headers.origin!==origin||!secretEquals(req.headers['x-shuttle-token'],auth.session.csrf))fail('Reload SHUTTLE before submitting',403);const b=await body(req);let result;

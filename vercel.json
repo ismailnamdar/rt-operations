@@ -4,10 +4,11 @@
   "buildCommand": "node scripts/build.mjs",
   "outputDirectory": "dist",
   "functions": {"api/*.mjs": {"maxDuration": 120, "includeFiles": "app/public/**"}},
-  "rewrites": [
-    {"source": "/api/cron", "destination": "/api/cron"},
-    {"source": "/api/shopify/webhook", "destination": "/api/shopify-webhook"},
-    {"source": "/:path*", "destination": "/api/index?__shuttle_path=/:path*"}
+  "routes": [
+    {"src": "/", "dest": "/api/index?__shuttle_path=/"},
+    {"handle": "filesystem"},
+    {"src": "/api/shopify/webhook", "dest": "/api/shopify-webhook"},
+    {"src": "/(.*)", "dest": "/api/index?__shuttle_path=/$1"}
   ],
   "crons": [{"path": "/api/cron", "schedule": "* * * * *"}]
 }
