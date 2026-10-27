@@ -38,7 +38,7 @@ This is NOT yet a fully connected live email/artwork/shipping system. Gmail inge
 3. In Vercel, choose **Add New → Project → Import Git Repository**.
 4. Select the private repository. Framework preset: **Other**. Root directory: repository root. The included `vercel.json` supplies the build command, routes and function settings. Node: **24.x**.
 5. Use a Vercel plan that supports minute cron jobs and 120-second functions for this commercial application. Do not invite warehouse staff as paid Vercel developers; their SHUTTLE logins are separate.
-6. Note the production hostname assigned by Vercel. You can reserve the project name before deployment. Set `SHUTTLE_ORIGIN` to that exact HTTPS origin, without a path; preview deployments are not automatically trusted production hosts.
+6. Keep **Settings → Environment Variables → Automatically expose System Environment Variables** enabled. SHUTTLE trusts the production domain (`VERCEL_PROJECT_PRODUCTION_URL`), the branch alias (`VERCEL_BRANCH_URL`) and the deployment's own URL (`VERCEL_URL`), so preview links work without extra configuration. Shopify OAuth, webhook registration and invitation links always use the production domain. Previews use whatever `DATABASE_URL` is scoped to the Preview environment; scope a separate database there unless previews should act on live data, and keep Deployment Protection enabled for previews.
 
 ## 2. Supabase connection — preserve existing data
 
@@ -57,7 +57,6 @@ Required:
 
 | Name | Value/source |
 |---|---|
-| `SHUTTLE_ORIGIN` | `https://YOUR-PROJECT.vercel.app` |
 | `DATABASE_URL` | Private Supabase transaction-pooler connection |
 | `DATABASE_CA_CERT` | Supabase SSL certificate (PEM text from Database Settings → SSL Configuration); enables verified TLS |
 | `CRON_SECRET` | Random secret, at least 32 characters |
@@ -109,7 +108,7 @@ The app uses the existing `SHUTTLE: <stage>` convention plus independent Hold an
 
 ## 7. Connect your custom domain later
 
-Add `shuttle.rugtomize.co` in Vercel's Domains settings and follow the exact DNS record Vercel provides. Preserve Shopify storefront/email records. Once HTTPS works, change `SHUTTLE_ORIGIN`, update Shopify webhook URLs and redeploy. Keep a single canonical application origin; staff should use the new address after cutover.
+Add `shuttle.rugtomize.co` in Vercel's Domains settings and follow the exact DNS record Vercel provides. Preserve Shopify storefront/email records. Once HTTPS works, make it the primary production domain (or set the optional `SHUTTLE_ORIGIN` override to its exact HTTPS origin), redeploy and re-run webhook setup so Shopify points at the new address. Keep a single canonical application origin; staff should use the new address after cutover.
 
 ## Testing and limits
 
@@ -190,7 +189,7 @@ A resumable initial scan of accessible unfulfilled orders backfills existing sel
 
 ## Vercel webhook activation (prepared; not active locally)
 
-Keep local minute polling until the public deployment and shared database are verified. The canonical receiver is SHUTTLE_ORIGIN + /api/shopify/webhook. No temporary tunnel is required or created.
+Keep local minute polling until the public deployment and shared database are verified. The canonical receiver is the production domain + /api/shopify/webhook. No temporary tunnel is required or created.
 
 Recommended app-owned setup: use SHOPIFY_WEBHOOK_SOURCE=app and the same private SHOPIFY_CLIENT_SECRET used by the installed app. Once deployed and authorized, the SHUTTLE owner may POST /api/shopify/webhooks/setup with their authenticated session, exact Origin, and X-Shuttle-Token CSRF header. This registers/reuses six exact-endpoint subscriptions: orders/create, orders/updated, orders/paid, orders/cancelled, orders/fulfilled, app/uninstalled. Registration requests only the payload id; the worker fetches current order facts from Shopify. The action never deletes other subscriptions. Uncertain registration is reconciled by re-listing subscriptions on the next attempt; it never blindly repeats a successful creation.
 
