@@ -8,6 +8,8 @@ import {createShopifyConnection} from './shopify-connection.mjs';
 import {syncPaidShippingOrders,importLatestOrders,syncChangedOrders} from './shopify-orders.mjs';
 import {shippingProvider} from './shipping-provider.mjs';
 import {resolveOrigins} from './origins.mjs';
+import {GmailClient} from './gmail.mjs';
+import {syncGmail} from './gmail-sync.mjs';
 let pending;
 export function validateDeployment(env){
  if(!env.DATABASE_URL)throw Error('Set the private Supabase PostgreSQL connection');
@@ -26,7 +28,8 @@ export async function createVercelRuntime({env=process.env,store,client,authFetc
  const driveClient=new GoogleDriveProduction({clientId:env.GDRIVE_CLIENT_ID,clientSecret:env.GDRIVE_CLIENT_SECRET,refreshToken:env.GDRIVE_REFRESH_TOKEN,writeEnabled:env.GDRIVE_WRITE_ENABLED==='1'}),drive=driveClient.configured()?driveClient:null;
  const supabaseAuth=new SupabaseAuth({url:env.SUPABASE_URL,key:env.SUPABASE_PUBLISHABLE_KEY||env.SUPABASE_ANON_KEY,ownerEmail:env.SHUTTLE_OWNER_EMAIL,fetchImpl:authFetch});
  const shopifyOAuth=env.SHOPIFY_AUTH_MODE==='oauth'?new ShopifyOAuth({env,store,origin}):null;
- const {handler}=await createServer({shopifyWebhookSetup:client&&(env.SHOPIFY_WEBHOOK_SOURCE||'app')==='app'?user=>setupShopifyWebhooks({store,client,origin,user}):null,shopifyOAuth,supabaseAuth,store,provider,origin,allowedOrigins,drive,serverless:true,demo:false,shopify:env.SHOPIFY_TAG_SYNC==='1'?client:null,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?async()=>{await syncPaidShippingOrders({store,client,pages:1});return syncChangedOrders({store,client,pages:2});}:null,setupToken:env.SHUTTLE_SETUP_TOKEN||'',ownerEmail:env.SHUTTLE_OWNER_EMAIL||'',stationToken:env.SHUTTLE_STATION_TOKEN||'',workflowToken:env.SHUTTLE_WORKFLOW_TOKEN||'',gmail:null,emailSendingEnabled:false});
- return {handler,store,client,drive,origin,env};
+ const gmailClient=new GmailClient({clientId:env.GMAIL_CLIENT_ID,clientSecret:env.GMAIL_CLIENT_SECRET,refreshToken:env.GMAIL_REFRESH_TOKEN,mailbox:'info@rugtomize.co'}),gmail=gmailClient.configured()?gmailClient:null;
+ const {handler}=await createServer({shopifyWebhookSetup:client&&(env.SHOPIFY_WEBHOOK_SOURCE||'app')==='app'?user=>setupShopifyWebhooks({store,client,origin,user}):null,shopifyOAuth,supabaseAuth,store,provider,origin,allowedOrigins,drive,serverless:true,demo:false,shopify:env.SHOPIFY_TAG_SYNC==='1'?client:null,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?async()=>{await syncPaidShippingOrders({store,client,pages:1});return syncChangedOrders({store,client,pages:2});}:null,setupToken:env.SHUTTLE_SETUP_TOKEN||'',ownerEmail:env.SHUTTLE_OWNER_EMAIL||'',stationToken:env.SHUTTLE_STATION_TOKEN||'',workflowToken:env.SHUTTLE_WORKFLOW_TOKEN||'',gmail,gmailSync:gmail?()=>syncGmail({store,gmail,labelSync:env.GMAIL_LABEL_SYNC==='1'}):null,emailSendingEnabled:false});
+ return {handler,store,client,drive,gmail,origin,env};
 }
 export async function runtime(){if(!pending)pending=createVercelRuntime().catch(error=>{pending=null;throw error;});return pending;}

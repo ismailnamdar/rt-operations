@@ -6,3 +6,9 @@ else if(response.ok){const s=await response.json(),role=s.hosted.user.role,heade
  const profile=document.querySelector('.profile');if(profile){profile.removeAttribute('href');profile.querySelector('small').textContent='Hosted workspace';}
  if(s.hosted.demo){const notice=document.createElement('p');notice.className='warehouse-notice';notice.textContent=s.hosted.shuttle2Local?'SHUTTLE 2.0 · existing data and agent actions. Production label purchases remain disabled.':'SHUTTLE migration preview — test shipments only. Gmail, Shopify, Parsel and GOAT are not connected.';document.querySelector('main')?.prepend(notice);}
 }
+
+// Synchronization remains available independently of sending/agent readiness.
+if(response.ok){const current=await(await fetch('/api/state')).json();if(current.hosted?.user?.role==='owner'){
+ const header=document.querySelector('.header-right'),status=document.createElement('span');status.className='hosted-profile';status.textContent=current.gmailSync?'Gmail '+current.gmailSync.status+' · '+current.gmailSync.pendingThreads+' pending':current.hosted.gmail.configured?'Gmail awaiting first sync':'Gmail not configured';header?.append(status);
+ for(const [label,route,configured]of [['Sync Gmail','/api/gmail/sync',current.hosted.gmail.configured],['Sync Drive','/api/drive/sync',current.hosted.drive.configured]]){const button=document.createElement('button');button.className='secondary';button.textContent=label;button.disabled=!configured;button.onclick=async()=>{button.disabled=true;try{const r=await fetch(route,{method:'POST',headers:{'Content-Type':'application/json','X-Shuttle-Token':current.token},body:'{}'}),result=await r.json();if(!r.ok)throw Error(result.error||'Source sync needs attention');location.reload();}catch(error){button.textContent=error.message;button.disabled=false;}};header?.append(button);}
+}}

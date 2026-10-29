@@ -33,7 +33,7 @@ const displayedReviewItems=new Map();
 const emailSavesInFlight=new Set();
 const deletionsInFlight=new Set(),deletionIntentKeys=new Map();
 function canSelectReview(item){return !deletionsInFlight.has(item.id)&&!emailSavesInFlight.has(item.id)&&!approvalReserved(item.id)&&!reviewInputReserved(item.id)}
-function canSaveEmail(item){return canSubmitApproval()&&!emailSavesInFlight.has(item.id)&&!approvalReserved(item.id)&&!reviewInputReserved(item.id)}
+function canSaveEmail(item){return (canSubmitApproval()||state?.hosted?.user?.role==='owner'&&state?.hosted?.gmail?.configured&&!busy)&&!emailSavesInFlight.has(item.id)&&!approvalReserved(item.id)&&!reviewInputReserved(item.id)}
 const names={mockups:'Mock-ups',home:'Home',agents:'Agents & History',review:'Review queue',oldest:'Orders',calendar:'Production',expedited:'Expedited orders',questions:'Policy questions',history:'Run history'};
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function button(text,cls,fn){const b=el('button',cls,text);b.addEventListener('click',fn);return b}
