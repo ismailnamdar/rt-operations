@@ -1,4 +1,5 @@
 import {authorizeSupabaseStaff} from './supabase-auth.mjs';
+import {checkIntegrations} from './integration-readiness.mjs';
 import {DisabledCarrier,shippingProvider} from './shipping-provider.mjs';
 import {processDriveRedo} from './drive-redo.mjs';
 import {controlCenter,acknowledgeControl} from './control-center.mjs';
@@ -80,6 +81,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    if(url.pathname==='/api/team/invite')result=supabaseAuth?await authorizeSupabaseStaff(store,user,b):await inviteUser(store,user,b,origin);
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
    else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
+   else if(url.pathname==='/api/integrations/check')result=await checkIntegrations({store,user,gmail,drive,provider,emailSendingEnabled});
    else if(url.pathname==='/api/drive/sync'){requireRole(user,['owner']);if(!drive)fail('Read-only Drive authorization is not configured',503);result=await drive.sync(store);}
    else if(url.pathname==='/api/shopify/webhooks/setup'){requireRole(user,['owner']);if(!shopifyWebhookSetup)fail('Webhook registration requires the deployed app and app signing mode',503);result=await shopifyWebhookSetup(user);}
    else if(url.pathname==='/api/shopify/refresh'){requireRole(user,['owner']);if(!shopifyRefresh)fail('Shopify connection is not configured',503);result=await shopifyRefresh();}
