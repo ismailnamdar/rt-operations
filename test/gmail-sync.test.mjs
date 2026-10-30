@@ -60,3 +60,7 @@ test('Drive failure does not prevent Gmail work and sources retain separate outc
  const store=await fixture(t),app={store,gmail:client(),drive:{sync:async()=>{throw Error('Drive unavailable');}},env:{}};
  const result=await runScheduled(app);assert.equal(result.ok,false);assert.equal(result.sources.gmail.status,'complete');assert.equal(result.sources.drive.status,'needs_attention');assert.ok((await store.read()).gmailSync.lastSuccessAt);assert.equal((await store.read()).scheduledLease,undefined);
 });
+test('a retained Gmail read failure is not reported as a healthy completed scheduled source',async t=>{
+ const store=await fixture(t);const result=await runScheduled({store,env:{},gmail:client({listMessages:async()=>({messages:[{id:'m-one',threadId:'one'}]}),getThread:async()=>{throw Object.assign(Error('denied'),{providerStatus:403});}})});
+ assert.equal(result.ok,false);assert.equal(result.sources.gmail.status,'needs_attention');assert.equal((await store.read()).snapshot.gmailSync.failedByProviderStatus['403'],1);
+});

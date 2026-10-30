@@ -18,8 +18,8 @@ export async function runScheduled(app){
    if(current.shopifyImport?.status!=='complete')await importLatestOrders({store:app.store,client:app.client,pages:1});
    else {if(current.shopifyExpeditedScan?.status!=='complete')await syncPaidShippingOrders({store:app.store,client:app.client,pages:1});await syncChangedOrders({store:app.store,client:app.client,pages:1});await processShopifyUpdates({store:app.store,client:app.client,limit:2});if(app.env.SHOPIFY_TAG_SYNC==='1')await syncShopifyStatuses({store:app.store,client:app.client,limit:4,deadline:Date.now()+45000});}
   }]);
-  const settled=await Promise.allSettled(tasks.map(([,run])=>run())),sources=Object.fromEntries(settled.map((result,i)=>[tasks[i][0],{status:result.status==='fulfilled'?'complete':'needs_attention'}]));
-  const ok=settled.every(r=>r.status==='fulfilled');await app.store.transaction(s=>{prepareScriptedDrafts(s);s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
+  const settled=await Promise.allSettled(tasks.map(([,run])=>run())),sources=Object.fromEntries(settled.map((result,i)=>[tasks[i][0],{status:result.status==='fulfilled'&&result.value?.status!=='needs_attention'?'complete':'needs_attention'}]));
+  const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
  }catch{await app.store.transaction(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:'needs_attention',message:'A scheduled source check failed; pending work is retained.'};});return {ok:false};}
  finally{await app.store.transaction(s=>{if(s.scheduledLease?.id===lease)delete s.scheduledLease;});}
 }
