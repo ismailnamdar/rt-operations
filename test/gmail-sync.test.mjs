@@ -43,6 +43,11 @@ test('simultaneous Gmail workers share one durable lease',async t=>{
  const store=await fixture(t);let enter,release;const entered=new Promise(r=>enter=r),gate=new Promise(r=>release=r);
  const first=syncGmail({store,gmail:client({verifyMailbox:async()=>{enter();await gate;return {emailAddress:mailbox,historyId:'100'};}})});await entered;assert.deepEqual(await syncGmail({store,gmail:client()}),{busy:true});release();await first;
 });
+test('new history changes are hydrated before the older initial backlog',async t=>{
+ const store=await fixture(t);await store.transaction(s=>{s.gmailSync={pending:{old:{queuedAt:'2020-01-01',attempts:0}},unread:{complete:true,count:0},sampleComplete:true,historyId:'100'};});
+ const reads=[];await syncGmail({store,gmail:client({history:async()=>({historyId:'101',history:[{messagesAdded:[{message:{id:'fresh-message',threadId:'fresh'}}]}]}),getThread:async id=>{reads.push(id);return thread(id);}}),limit:1});
+ assert.deepEqual(reads,['fresh']);assert.ok((await store.read()).gmailSync.pending.old);
+});
 test('optional label writes occur only after inquiry persistence and stay off by default',async t=>{
  const store=await fixture(t);let labeled=0;const gmail=client({listMessages:async()=>({messages:[{id:'m-one',threadId:'one'}]}),applyReviewLabel:async()=>{assert.ok((await store.read()).gmailCarryover['m-one']);labeled++;return {labelId:'Label1',messageIds:['m-one']};}});
  await syncGmail({store,gmail});assert.equal(labeled,0);await store.transaction(s=>{s.gmailSync.pending.one={attempts:0};});await syncGmail({store,gmail,labelSync:true});assert.equal(labeled,1);assert.equal((await store.read()).gmailConversations.one.labelReceipt.operation,'add-label-only');
