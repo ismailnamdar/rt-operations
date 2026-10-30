@@ -502,8 +502,15 @@ function responseGroupId(item){
  if(label==='Support/General')return 'billing';
  return 'other';
 }
+const REVIEW_BATCHES=[
+ ['customer_approvals','flat_approvals','Flat approvals'],
+ ['approval_needs_reply','approval_reply','Approval needs reply'],
+ ['support','support','Support'],
+ ['expedited','expedited','Expedited shipping'],
+ ['general','general','General inquiries']
+];
 function groupReviewItems(items){
- return [...RESPONSE_GROUPS].sort((a,b)=>(a[0]==='approval_needs_reply'?-1:b[0]==='approval_needs_reply'?1:0)).map(([id,title,description])=>({id,title,description,items:items.filter(i=>responseGroupId(i)===id)})).filter(g=>g.items.length);
+ return REVIEW_BATCHES.map(([id,category,title])=>({id,title,description:'Review and approve this category together.',items:items.filter(i=>reviewWorkspaceCategory(i)===category)})).filter(g=>g.items.length);
 }
 const openReviewGroups=new Set();
 function reviewWorkspaceCategory(item){
@@ -551,11 +558,11 @@ function renderReviewGroup(group){
   if(!candidates.length)return;
   confirmApproval(candidates,group.title,{kind:'review',ids:candidates.map(i=>i.id),groupTitle:group.title,selectedIds:new Set(candidates.map(i=>i.id))});
  });send.setAttribute('aria-label','Approve & send in '+group.title);actions.append(label,el('span','group-selected',''),approve,send);
- const remove=button('Delete selected','secondary group-delete',()=>deleteReviewItems(pending().filter(i=>responseGroupId(i)===group.id&&selected.has(i.id))));remove.setAttribute('aria-label','Delete selected in '+group.title);actions.append(remove);
+ const remove=button('Delete selected','secondary group-delete',()=>deleteReviewItems(group.items.filter(i=>selected.has(i.id)&&!approvalReserved(i.id)&&!reviewInputReserved(i.id))));remove.setAttribute('aria-label','Delete selected in '+group.title);actions.append(remove);
  const instructions=button('Request changes','text-button',()=>showGroupInstructions(group));instructions.setAttribute('aria-label','Request changes for '+group.title);actions.append(instructions);
  section.append(actions);
  const details=el('details','response-group-details');details.open=openReviewGroups.has(group.id)||!!$('#search').value.trim();
- details.append(el('summary','',`Messages (${group.items.length})`));
+ details.append(el('summary','',`${group.title} (${group.items.length})`));
  const cases=el('div','group-cases');
  const mount=()=>{if(!cases.childElementCount){cases.append(compactColumnLabels(),...[...group.items].sort((a,b)=>Number(canApproveItem(b))-Number(canApproveItem(a))).map(renderReviewCard));updateDecisionButtons();syncReviewSelection()}};
  details.append(cases);if(details.open)mount();
