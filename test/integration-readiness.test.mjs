@@ -11,3 +11,6 @@ test('readiness is owner-only and probes never buy, send or return provider cust
 test('provider failures produce actionable safe diagnostics and preserve independent results',async()=>{
  const result=await checkIntegrations({store:{read:async()=>blank()},user:{role:'owner'},gmail:{configured:()=>true,verifyMailbox:async()=>{throw Error('credential detail');}},provider:{disabled:true}});assert.equal(result.checks.gmail.authenticatedRead,false);assert.equal(result.checks.parsel.configured,false);assert.doesNotMatch(JSON.stringify(result),/credential detail/);
 });
+test('a saved Parsel token can be checked while the operational provider stays disabled',async()=>{
+ const calls=[];const result=await checkIntegrations({store:{read:async()=>blank()},user:{role:'owner'},provider:{disabled:true},parselProbe:()=>({request:async route=>{calls.push(route);}})});assert.deepEqual(calls,['/shipments']);assert.equal(result.checks.parsel.configured,true);assert.equal(result.checks.parsel.enabledForOperations,false);assert.equal(result.checks.parsel.authenticatedRead,true);assert.equal(result.checks.parsel.purchasesEnabled,false);
+});
