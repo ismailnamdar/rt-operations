@@ -4,18 +4,19 @@ import {SHEET_GROUPS,sheetItems,sheetGroup} from './production-sheet.js';
 import {SHAPES} from './rug-shapes.js';
 import {buildProductionRuns} from './production-runs.js';
 const element=(tag,text='',cls='')=>{const e=document.createElement(tag);e.textContent=text;e.className=cls;return e;};
-let previewCount=0;
+let previewQueue=[],activePreviews=0;
+function pumpPreviews(){while(activePreviews<4&&previewQueue.length){const job=previewQueue.shift();if(!job.img.isConnected)continue;activePreviews++;job.start(()=>{activePreviews--;pumpPreviews();});}}
 function artworkPreview(url,alt){
  const box=element('div','','artwork-preview-image'),img=element('img'),retry=element('button','Retry artwork preview','secondary');
- const priority=previewCount++<20;img.loading=priority?'eager':'lazy';img.decoding='async';if(priority)img.fetchPriority='high';img.alt=alt;retry.type='button';retry.hidden=true;
- img.onload=()=>{retry.hidden=true;};img.onerror=()=>{retry.hidden=false;};
- retry.onclick=e=>{e.stopPropagation();retry.hidden=true;const next=new URL(url,location.origin);next.searchParams.set('retry',String(Date.now()));img.src=next.href;};
- img.src=url;box.append(img,retry);return box;
+ img.loading='eager';img.decoding='async';img.alt=alt;retry.type='button';retry.hidden=true;
+ const enqueue=()=>{previewQueue.push({img,start:done=>{let attempts=0;const load=()=>{const next=new URL(url,location.origin);if(attempts)next.searchParams.set('retry',String(Date.now()));img.src=next.href;};img.onload=()=>{retry.hidden=true;done();};img.onerror=()=>{if(attempts++<2&&img.isConnected){setTimeout(load,1000*attempts);return;}retry.hidden=false;done();};load();}});queueMicrotask(pumpPreviews);};
+ retry.onclick=e=>{e.stopPropagation();retry.hidden=true;enqueue();};
+ box.append(img,retry);enqueue();return box;
 }
 function productionDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||''))return value||'Date not recorded';return new Date(value+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});}
 let selectedRun=null,bookingOpen=false,shapeFilter='all',runPage='main';
 export function renderProduction(state,api,refresh,toast,selector='#production-run-content'){
- previewCount=0;refreshOrderDetail(state);const root=document.querySelector(selector);if(!root)return;root.replaceChildren();const role=state.hosted?.user.role,operate=['owner','warehouse'].includes(role),data=state.productionShipping;document.body.dataset.hostedRole=role;
+ previewQueue=[];refreshOrderDetail(state);const root=document.querySelector(selector);if(!root)return;root.replaceChildren();const role=state.hosted?.user.role,operate=['owner','warehouse'].includes(role),data=state.productionShipping;document.body.dataset.hostedRole=role;
  root.append(element('p',data?.driveInventory?'Drive folders · '+data.driveInventory.fileCount+' artwork files · checked '+new Date(data.driveInventory.checkedAt).toLocaleString()+'. Shipping still requires verified prescan.':state.hosted?.demo?'TEST MODE — simulated carrier labels only. No live orders or purchases.':'Shipping connection awaiting supervised validation.','warehouse-notice production-status-note'));
  const heading=element('div','','warehouse-tools');if(state.hosted?.demo&&!data?.driveInventory&&role==='owner'){const b=element('button','Add Parsel test shipment','secondary');b.onclick=()=>act('/api/demo/load',{});heading.append(b);}if(state.hosted?.drive?.configured&&role==='owner'){const sync=element('button','Refresh Drive folders','secondary');sync.onclick=()=>act('/api/drive/sync',{});heading.append(sync);}root.append(heading);
  const redos=(data?.redoRequests||[]).filter(r=>r.status!=='resolved');if(redos.length){const queue=element('section','','redo-queue');queue.append(element('h2','Redo queue · '+redos.length));if(role==='owner')queue.append(element('p','Flagged for you · already queued, no approval needed'));for(const request of redos){const row=element('article','','redo-queue-row');row.append(element('strong',request.orders.map(n=>'#'+n).join(' + ')),element('span',request.rugId+' · '+request.reason+' · '+(request.status==='needs_source_verification'?'Needs source verification':'Queued')));if(operate&&request.intentId){const form=element('form'),qc=element('input'),packed=element('input');qc.type=packed.type='checkbox';qc.required=packed.required=true;const qclabel=element('label'),packedlabel=element('label');qclabel.append(qc,document.createTextNode(' Redo passed QC'));packedlabel.append(packed,document.createTextNode(' Packed'));const done=element('button','Complete redo','secondary');form.append(qclabel,packedlabel,done);form.onsubmit=e=>{e.preventDefault();act('/api/warehouse/redo/resolve',{id:request.id,qcPassed:qc.checked,packed:packed.checked});};row.append(form);}queue.append(row);}root.append(queue);}
