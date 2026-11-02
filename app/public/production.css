@@ -100,3 +100,18 @@ body[data-hosted-role="warehouse"] #view-calendar> :not(#production-run-content)
 .control-center-toggle{display:flex;align-items:center;gap:10px;padding:6px 16px 6px 6px;background:linear-gradient(135deg,#253c32,#10261d);border-color:#c7a458;color:#fff3cb;box-shadow:0 8px 28px #10251e30,inset 0 1px #ffffff18}
 .gideon-figure{width:46px;height:54px;object-fit:contain;flex-shrink:0;filter:drop-shadow(0 2px 3px #0002)}.gideon-name{font-weight:650;letter-spacing:.3px}.gideon-count{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;background:#f0d18a;color:#26382c;border-radius:12px;font-size:11px;font-weight:700}.gideon-heading{display:flex;align-items:center;gap:10px}.gideon-heading .gideon-figure{width:48px;height:56px}
 @media(max-width:520px){.control-center-toggle{right:14px;bottom:14px}.gideon-figure{width:38px;height:44px}}
+
+/* Gideon is the single prescan review surface. */
+.prescan-review-form,.gideon-chat-form{display:grid;gap:12px}
+.prescan-review-form label,.gideon-chat-form label{display:grid;gap:6px;font-size:12px;font-weight:600}
+.prescan-review-form input:not([type=checkbox]),.prescan-review-form textarea,.prescan-review-form select,.gideon-chat-form textarea,.gideon-chat-form select{box-sizing:border-box;width:100%;min-width:0;border:1px solid #dce3df;border-radius:9px;padding:10px 12px;background:#fff;color:#22362d;font:inherit;outline-offset:3px}
+.prescan-review-form textarea,.gideon-chat-form textarea{min-height:82px;resize:vertical}
+.prescan-review-form details{padding:10px 0;border-top:1px solid #edf0ed}
+.prescan-review-form summary{cursor:pointer;font-weight:600;font-size:12px}
+.prescan-review-form details>label{margin-top:10px}
+.prescan-review-form button,.gideon-chat-form button{border:0;border-radius:9px;padding:10px 14px;background:#264b3a;color:white;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.prescan-review-form button:disabled,.gideon-chat-form button:disabled{opacity:.5;cursor:wait}
+.prescan-order-list{max-height:340px;overflow:auto;padding:0 6px 0 0;overscroll-behavior:contain}
+.gideon-conversation>[aria-label="Gideon conversation"]{max-height:220px;overflow:auto;white-space:pre-wrap}
+.gideon-conversation article{padding:9px 0;border-top:1px solid #edf0ed}
+.control-center-item>label:has(input[type=checkbox]){display:flex;gap:9px;align-items:flex-start;margin:16px 0;font-size:12px;line-height:1.5}
