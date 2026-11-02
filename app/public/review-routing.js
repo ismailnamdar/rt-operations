@@ -1,6 +1,6 @@
 // SHUTTLE 2.0 response-group identities. Routing is not artwork approval or
 // authority to send, file, archive, purchase or resolve an inquiry.
-export const REVIEW_ROUTING_VERSION='shuttle-2026-11-02-v1';
+export const REVIEW_ROUTING_VERSION='shuttle-2026-11-02-v2';
 export const REVIEW_GROUP_IDS=['customer_approvals','approval_needs_reply','support_general','support_chargeback','placement','color','artwork','proof','production','deadline','shipping','quality','billing','identity','quotes','collaboration','business_operations','other'];
 const mailbox=from=>String(from||'').match(/<([^>]+)>/)?.[1]?.toLowerCase()||String(from||'').trim().toLowerCase();
 const own=m=>(m.labels||[]).includes('SENT')||/^info@rugtomize\.(co|com)$/.test(mailbox(m.from));
