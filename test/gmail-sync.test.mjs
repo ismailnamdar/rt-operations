@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';import os from 'node:os';import path from 'nod
 import {createStore,blank} from '../app/store.mjs';
 import {syncGmail,mergeGmailThread,UNREAD_QUERY} from '../app/gmail-sync.mjs';
 import {saveReviews} from '../app/reviews.mjs';
-import {GmailClient} from '../app/gmail.mjs';
+import {GmailClient,retryDelay} from '../app/gmail.mjs';
 import {runScheduled} from '../api/cron.mjs';
 const mailbox='info@rugtomize.co';
 const message=(id,threadId,labels=['UNREAD'],text='Could you check my order?')=>({id,threadId,labelIds:labels,internalDate:'1793200000000',payload:{mimeType:'text/plain',headers:[{name:'From',value:'Customer <customer@example.invalid>'},{name:'Subject',value:'Order #16400'},{name:'Message-ID',value:'<'+id+'@example.invalid>'}],body:{data:Buffer.from(text).toString('base64url')}}});
@@ -64,3 +64,12 @@ test('a retained Gmail read failure is not reported as a healthy completed sched
  const store=await fixture(t);const result=await runScheduled({store,env:{},gmail:client({listMessages:async()=>({messages:[{id:'m-one',threadId:'one'}]}),getThread:async()=>{throw Object.assign(Error('denied'),{providerStatus:403});}})});
  assert.equal(result.ok,false);assert.equal(result.sources.gmail.status,'needs_attention');assert.equal((await store.read()).snapshot.gmailSync.failedByProviderStatus['403'],1);
 });
+test('missing conversations are deferred without dropping carryover or starving later mail',async t=>{
+ const store=await fixture(t);await store.transaction(s=>{s.gmailSync={pending:{gone:{attempts:0,queuedAt:'2020-01-01'},fresh:{attempts:0,queuedAt:'2020-01-02'}},unread:{complete:true,count:0},sampleComplete:true,historyId:'100'};s.gmailCarryover={source:{threadId:'gone',messageId:'source',status:'unresolved'}};});
+ const reads=[],gmail=client({getThread:async id=>{reads.push(id);if(id==='gone')throw Object.assign(Error('gone'),{providerStatus:404});return thread(id);}});
+ await syncGmail({store,gmail,limit:1});await syncGmail({store,gmail,limit:1});assert.deepEqual(reads,['gone','fresh']);const s=await store.read();assert.ok(s.gmailSync.pending.gone.blocked);assert.equal(s.gmailCarryover.source.status,'unresolved');assert.ok(s.gmailSync.pending.gone.nextEligibleAt>Date.now()+23*3600000);
+});
+test('unchanged recent carryover is retained without being repeatedly downloaded',async t=>{
+ const store=await fixture(t);await store.transaction(s=>{mergeGmailThread(s,thread('one'),mailbox);s.gmailSync.pending={};s.gmailSync.unread={complete:true,count:0};s.gmailSync.sampleComplete=true;s.gmailSync.historyId='100';});let reads=0;await syncGmail({store,gmail:client({getThread:async id=>{reads++;return thread(id);}})});assert.equal(reads,0);assert.equal((await store.read()).gmailCarryover['m-one'].status,'unresolved');
+});
+test('Google Retry-After values are honored',()=>{assert.equal(retryDelay('120'),120000);assert.equal(retryDelay('invalid'),0);});

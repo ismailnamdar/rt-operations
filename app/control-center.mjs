@@ -12,6 +12,11 @@ export function detectProductionRollover(s,runs,now){
 }
 export function controlCenter(s,user){
  const items=[];
+ if(user.role==='owner'){
+  const pending=Object.values(s.gmailSync?.pending||{}),unavailable=pending.filter(p=>p.providerStatus===404).length,failed=pending.filter(p=>p.error).length;
+  if(failed)items.push({id:'sync:gmail',kind:'sync',title:'Gmail needs attention',detail:`${pending.length} conversations queued; ${unavailable} unavailable conversations and ${failed-unavailable} other failures. Unresolved inquiries are retained. Unavailable sources do not block new email processing.`,action:'Check integrations'});
+  if(s.lastScheduledRun?.at&&Date.now()-Date.parse(s.lastScheduledRun.at)>300000)items.push({id:'sync:scheduler',kind:'sync',title:'Automatic sync is overdue',detail:'The last saved scheduled run is more than five minutes old. Check Vercel cron execution and logs.',action:'Check integrations'});
+ }
  for(const transition of s.productionTransitions||[]){for(const row of transition.orders){const order=String(row.order),intents=s.intents.filter(i=>i.approved.orders.some(n=>String(n)===order)),redos=(s.redoRequests||[]).filter(r=>r.orders.includes(order)&&r.status!=='resolved');
  const reasons=[];if(!intents.length||intents.some(i=>!i.booking))reasons.push('No saved label');if(row.hold||redos.length||intents.some(i=>i.redoHold||i.status==='held'))reasons.push('On hold');if(!intents.length||!intents.some(i=>i.booking||i.packed?.length||i.labelAppliedAt))reasons.push('No recorded shipping action');
  if(reasons.length)items.push({id:'reconcile:'+transition.id+':'+order,kind:'reconciliation',title:'#'+order+' · '+transition.runName,detail:reasons.join(' · ')+'. '+transition.nextRunName+' is now upcoming.',order,runId:transition.runId,action:'Review order',createdAt:transition.detectedAt});
