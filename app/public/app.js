@@ -1,3 +1,4 @@
+import {classifyReviewConversation} from './review-routing.js';
 import {needsNextProduction} from './expedited-urgency.js';
 import {renderControlCenter} from './control-center.js';
 import {renderProduction as renderProductionPage} from './production-ui.js';
@@ -372,7 +373,7 @@ for(const b of $$('[data-delete-review]')){const item=pending().find(i=>i.id===b
   b.title=item?emailSendHint(item):'Already submitted';
  }
  for(const hint of $$('.email-send-hint')){const item=pending().find(i=>i.id===hint.dataset.emailId);if(item)hint.textContent=emailSendHint(item)}
-const dirty=pending().filter(i=>emailDirty(i)&&canSaveEmail(i)),flat=pending().filter(isFlat);$('#save-all-edits').disabled=!canSubmitApproval()||!dirty.length;$('#save-all-edits').textContent='Save edits'+(dirty.length?' ('+dirty.length+')':'');$('#flat-count').textContent=flat.length;$('#approve-flat').disabled=!canSubmitApproval()||!flat.length;$('#flat-batch').hidden=!flat.length;for(const b of $$('.save-email')){const i=pending().find(i=>i.id===b.dataset.emailId);b.disabled=!i||!canSaveEmail(i)||!emailDirty(i)||emailDraft(i).version!==i.version;b.textContent=emailSavesInFlight.has(b.dataset.emailId)?'Saving…':'Save changes';}for(const wrap of $$('.compact-email')){const i=pending().find(i=>i.id===wrap.dataset.emailId);wrap.querySelector('.editor-actions').hidden=!i||(!emailDirty(i)&&emailDraft(i).version===i.version)}for(const b of $$('.reset-email')){const i=pending().find(i=>i.id===b.dataset.emailId);b.disabled=!i||!emailDirty(i)}for(const b of $$('.save-dialog-emails')){const ids=JSON.parse(b.dataset.emailIds),dirty=pending().filter(i=>ids.includes(i.id)&&emailDirty(i)&&canSaveEmail(i));b.disabled=!canSubmitApproval()||!dirty.length||dirty.some(i=>emailDraft(i).version!==i.version);b.textContent='Save edits'+(dirty.length?' ('+dirty.length+')':'');b.hidden=!dirty.length}syncReviewSelection();updateDialogControls();}
+const dirty=pending().filter(i=>emailDirty(i)&&canSaveEmail(i)),flat=pending().filter(isFlat);$('#save-all-edits').disabled=!canSubmitApproval()||!dirty.length;$('#save-all-edits').textContent='Save edits'+(dirty.length?' ('+dirty.length+')':'');$('#flat-count').textContent=flat.length;$('#approve-flat').disabled=!canSubmitApproval()||!flat.length;$('#flat-batch').hidden=true;for(const b of $$('.save-email')){const i=pending().find(i=>i.id===b.dataset.emailId);b.disabled=!i||!canSaveEmail(i)||!emailDirty(i)||emailDraft(i).version!==i.version;b.textContent=emailSavesInFlight.has(b.dataset.emailId)?'Saving…':'Save changes';}for(const wrap of $$('.compact-email')){const i=pending().find(i=>i.id===wrap.dataset.emailId);wrap.querySelector('.editor-actions').hidden=!i||(!emailDirty(i)&&emailDraft(i).version===i.version)}for(const b of $$('.reset-email')){const i=pending().find(i=>i.id===b.dataset.emailId);b.disabled=!i||!emailDirty(i)}for(const b of $$('.save-dialog-emails')){const ids=JSON.parse(b.dataset.emailIds),dirty=pending().filter(i=>ids.includes(i.id)&&emailDirty(i)&&canSaveEmail(i));b.disabled=!canSubmitApproval()||!dirty.length||dirty.some(i=>emailDraft(i).version!==i.version);b.textContent='Save edits'+(dirty.length?' ('+dirty.length+')':'');b.hidden=!dirty.length}syncReviewSelection();updateDialogControls();}
 function inputSource(category,id){return state?.workspaceInputs?.find(s=>s.category===category&&s.id===String(id))}
 function decisionKey(source){return 'shuttle-instruction-'+source.category+'-'+source.id}
 function decisionDraft(source){return stored(decisionKey(source))||{version:source.version,answer:'',savePolicy:false}}
@@ -447,7 +448,7 @@ function renderReplySendStatus(){
 
 // Grouping organizes review only. Each case retains its own facts, edits and approval gates.
 const RESPONSE_GROUPS = [
- ['customer_approvals','Flat approvals','Verified approvals with editable production confirmations. Select individually or together to send.'],
+ ['customer_approvals','Flat approvals','Approval conversations for review; exact whole-order proofs and send checks remain required.'],
  ['approval_needs_reply','Approved · Needs reply','Approve to send the reply and file the approved artwork in DONE READY 4 PRINT.'],
  ['support_general','Support · General','Refund, return, invoice and billing cases awaiting their individual resolution.'],
  ['support_chargeback','Support · Chargeback','Dispute and chargeback-related cases awaiting their individual resolution.'],
@@ -479,11 +480,13 @@ const REVIEW_GROUP_OVERRIDES = {
  quotes:['inquiry-office-material','banda-hold-1a07414f90e8d0ca']
 };
 function responseGroupId(item){
+ if(item.reviewRouting?.sourceVersion===(item.sourceVersion||item.version||null)&&item.reviewRouting?.group)return item.reviewRouting.group;
+ if(item.gmailManaged)return classifyReviewConversation(item).group;
  if(item.approvalReviewKind==='needs_reply')return 'approval_needs_reply';
  if(item.approvalReviewKind==='flat')return 'customer_approvals';
  if(item.workflowLabel==='Support/General')return 'support_general';
  if(item.workflowLabel==='Support/Chargeback')return 'support_chargeback';
- if(RESPONSE_GROUPS.some(([id])=>id===item.responseGroupId))return item.responseGroupId;
+ if(item.responseGroupId!=='other'&&RESPONSE_GROUPS.some(([id])=>id===item.responseGroupId))return item.responseGroupId;
  for(const [id,ids] of Object.entries(REVIEW_GROUP_OVERRIDES))if(ids.includes(item.id))return id;
  const label=item.workflowLabel||'',text=[item.title,item.customerQuestion].filter(Boolean).join(' ').toLowerCase();
  if(label==='Collaborations')return 'collaboration';
@@ -504,7 +507,7 @@ function responseGroupId(item){
 }
 const REVIEW_BATCHES=[
  ['customer_approvals','flat_approvals','Flat approvals'],
- ['approval_needs_reply','approval_reply','Approval needs reply'],
+ ['approval_needs_reply','approval_reply','Approval + needs reply'],
  ['support','support','Support'],
  ['expedited','expedited','Expedited shipping'],
  ['general','general','General inquiries']
@@ -523,7 +526,7 @@ function reviewWorkspaceCategory(item){
 }
 function visibleReviewItems(){
  const query=$('#search').value.trim().toLowerCase();
- return pending().filter(i=>(filter==='all'||reviewWorkspaceCategory(i)===filter)&&[i.order,i.customer,i.title,i.customerQuestion,RESPONSE_GROUPS.find(([id])=>id===responseGroupId(i))?.[1]].join(' ').toLowerCase().includes(query));
+ return pending().filter(i=>[i.order,i.customer,i.title,i.customerQuestion,RESPONSE_GROUPS.find(([id])=>id===responseGroupId(i))?.[1]].join(' ').toLowerCase().includes(query));
 }
 function reviewCaseName(item){return [item.order?'#'+item.order:'Inquiry',item.customer||item.title||'Customer'].join(' · ')}
 function reviewSummary(rows){const artwork=rows.filter(i=>!updatedMockupReady(i)).length;return rows.length+' conversations'+(artwork?' · '+artwork+' awaiting artwork':'')}
@@ -531,7 +534,7 @@ function renderReview(){
  updateSelection();renderReplySendStatus();renderApprovalQueue();renderLatestSubmission();renderReconciliationStatus();
  const rows=visibleReviewItems(),groups=groupReviewItems(rows),ready=rows.filter(canApproveItem);
  $('#review-summary').textContent=reviewSummary(rows);
- $('#review-count').textContent=pending().length;
+ $('#review-count').textContent=pending().length;const allItems=$('#review-filters [data-filter=all]');if(allItems)allItems.textContent='All items ('+pending().length+')';
  const host=$('#review-list'),existing=new Map([...host.children].filter(e=>e.dataset.groupId).map(e=>[e.dataset.groupId,e]));for(const e of [...host.children])if(!e.dataset.groupId||!groups.some(g=>g.id===e.dataset.groupId))e.remove();for(const [index,g] of groups.entries()){const key=JSON.stringify([g.items.map(i=>[i.id,i.version,i.status,i.emailBody,i.body,i.blockers]),canSubmitApproval(),g.items.map(i=>[canSelectReview(i),selected.has(i.id)])]);let node=existing.get(g.id);if(!node||node.dataset.renderVersion!==key){const fresh=renderReviewGroup(g);fresh.dataset.renderVersion=key;if(node)node.replaceWith(fresh);node=fresh;}if(host.children[index]!==node)host.insertBefore(node,host.children[index]||null);}
  if(!groups.length)host.append(el('div','empty',$('#search').value?'No matching conversations.':'No pending items in this view.'));
  updateReviewControls();renderDecisionBar('review');syncReviewSelection();
@@ -541,7 +544,7 @@ function renderReviewGroup(group){
  const ready=group.items.filter(canApproveItem),held=group.items.length-ready.length,drafts=group.items.filter(emailField).length;
  const section=el('section','response-group');section.dataset.groupId=group.id;
  const head=el('div','response-group-head'),title=el('div','response-group-title'),counts=el('div','response-group-counts');
- title.append(el('h2','',group.title));
+ title.append(el('h2','',group.title),el('small','meta-line',group.items.length+' conversations'));
  if(ready.length)counts.append(el('span','pill green',ready.length+(group.id==='customer_approvals'?' drafts':' to send')));
  if(held)counts.append(el('span','pill amber',held+' pending'));
  

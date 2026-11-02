@@ -1,4 +1,5 @@
 import {processProductionRefresh} from '../app/production-refresh.mjs';
+import {organizeReviewCategories} from '../app/review-routing.mjs';
 import {syncGmail} from '../app/gmail-sync.mjs';
 import {prepareScriptedDrafts} from '../app/scripted-drafts.mjs';
 import {processDriveRedo} from '../app/drive-redo.mjs';
@@ -22,7 +23,7 @@ export async function runScheduled(app){
   if(app.client)tasks.push(['productionRefresh',()=>processProductionRefresh({store:app.store,client:app.client,limit:12,deadline:Date.now()+20000})]);
   const settled=await Promise.allSettled(tasks.map(([,run])=>run())),sources=Object.fromEntries(settled.map((result,i)=>[tasks[i][0],{status:result.status==='fulfilled'&&result.value?.status!=='needs_attention'?'complete':'needs_attention'}]));
   if(app.livePrescan){try{const result=await app.livePrescan.run();sources.prescan={status:'complete'};await app.store.transaction(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'complete',...result};});}catch(error){sources.prescan={status:'needs_attention'};await app.store.transaction(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'needs_attention',message:error.message};});}}
-  const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
+  const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);organizeReviewCategories(s);s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
  }catch{await app.store.transaction(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:'needs_attention',message:'A scheduled source check failed; pending work is retained.'};});return {ok:false};}
  finally{await app.store.transaction(s=>{if(s.scheduledLease?.id===lease)delete s.scheduledLease;});}
 }

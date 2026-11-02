@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {threadVersion,emailAddress} from './gmail.mjs';
 import {fingerprint} from './shipping.mjs';
 import {prepareScriptedDrafts} from './scripted-drafts.mjs';
+import {organizeReviewCategories} from './review-routing.mjs';
 
 export const UNREAD_QUERY='is:unread -in:trash -in:sent -in:drafts';
 const SAMPLE_QUERY='-in:trash -in:spam -in:sent -in:drafts';
@@ -32,7 +33,7 @@ export function mergeGmailThread(s,thread,mailbox){
  item.version=existing&&prior?.sourceVersion===sourceVersion?existing.version:fingerprint({threadId:thread.id,sourceVersion,body:item.body});
  if(existing)Object.assign(existing,item);else s.snapshot.results.review.push(item);
  for(const entry of unresolved){entry.reviewId=reviewId;entry.lastVerifiedAt=now();entry.blocker=validRecipient?null:'Sender address needs owner verification';}
- s.snapshot.results.updatedAt=now();s.snapshot.results.sourceLabel='Live Gmail — sending disabled';
+ s.snapshot.results.updatedAt=now();s.snapshot.results.sourceLabel='Live Gmail — sending disabled';organizeReviewCategories(s);
 }
 
 export async function syncGmail({store,gmail,limit=20,pages=2,deadline=Date.now()+45000,labelSync=false}){
