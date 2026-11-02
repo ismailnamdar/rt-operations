@@ -1,5 +1,6 @@
 import {requireRole} from './auth.mjs';
 import {fail,record} from './shipping.mjs';
+import {prescanReport} from './live-prescan.mjs';
 export function detectProductionRollover(s,runs,now){
  const prior=s.snapshot.productionRuns?.runs||[],known=new Set(prior.map(r=>r.id)),currentId=s.settings.upcomingProductionRunId,current=prior.find(r=>r.id===currentId);
  if(!current)return;
@@ -13,6 +14,7 @@ export function detectProductionRollover(s,runs,now){
 export function controlCenter(s,user){
  const items=[];
  if(user.role==='owner'){
+  for(const run of s.snapshot.productionRuns?.runs||[]){if(run.id!==s.settings.upcomingProductionRunId&&!(s.prescanJobs||[]).some(j=>j.runId===run.id&&j.status!=='superseded'&&j.liveStatus!=='booked'))continue;const report=prescanReport(s,run.id);items.push({id:'prescan:'+run.id,kind:'prescan',title:run.name+' · shipping prescan',detail:report.rows.length+' orders · '+report.rows.filter(r=>r.status==='ready_for_owner').length+' ready for your purchase approval. Handoff uses this run’s production date; holds and pickup orders are excluded.',runId:run.id,action:'Review prescan'});}
   const pending=Object.values(s.gmailSync?.pending||{}),unavailable=pending.filter(p=>p.providerStatus===404).length,failed=pending.filter(p=>p.error).length;
   if(failed)items.push({id:'sync:gmail',kind:'sync',title:'Gmail needs attention',detail:`${pending.length} conversations queued; ${unavailable} unavailable conversations and ${failed-unavailable} other failures. Unresolved inquiries are retained. Unavailable sources do not block new email processing.`,action:'Check integrations'});
   if(s.lastScheduledRun?.at&&Date.now()-Date.parse(s.lastScheduledRun.at)>300000)items.push({id:'sync:scheduler',kind:'sync',title:'Automatic sync is overdue',detail:'The last saved scheduled run is more than five minutes old. Check Vercel cron execution and logs.',action:'Check integrations'});

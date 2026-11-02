@@ -46,6 +46,7 @@ export async function approveProductionAndBook({store,provider,user,id}){
  return scanAndBook({store,provider,user,id,queuePrint:false});
 }
 export function enqueuePrint(s,user,i,reprint){
+ if(i.fulfillmentPending)fail('Shopify tracking/fulfillment verification must complete before printing');
  if(i.redoHold)fail('Redo requested; resolve the affected rugs before printing labels');
  if(!i.booking)fail('No booked label to print');if(!reprint&&s.printJobs.some(j=>j.intentId===i.id&&['queued','claimed','spooled','uncertain'].includes(j.status)))return null;
  const job={id:randomUUID(),requestedBy:user.id,requestedByLabel:user.name||user.email||user.id,intentId:i.id,bookingId:i.booking.id,carrier:i.booking.carrier,format:i.booking.format||'PDF',status:i.booking.format==='ZPL'?'queued':'manual_required',isTest:i.booking.isTest===true,reprint,createdAt:new Date().toISOString()};s.printJobs.push(job);record(s,reprint?'reprint_requested':'print_queued',user,{intentId:i.id,printJobId:job.id});return job;
