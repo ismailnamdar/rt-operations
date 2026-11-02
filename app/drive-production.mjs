@@ -1,10 +1,11 @@
 import {detectProductionRollover} from './control-center.mjs';
+import {prepareEarlyPrescan} from './early-prescan.mjs';
 import {createHash} from 'node:crypto';
 export function productionFile(file){
  const fileName=file.title||file.name||'',name=fileName.replace(/^(?:copy of\s+)+/i,''),match=name.match(/^(\d{4,6})(?=[. _-]|$)/),dimensions=name.match(/^\d{4,6}[. _-](\d+(?:\.\d+)?)(in|ft)?x(\d+(?:\.\d+)?)(in|ft)?/i);
  const size=dimensions?dimensions[1]+(dimensions[2]||'')+'x'+dimensions[3]+(dimensions[4]||''):'Size unverified';
  const shape=/\bcircle\b|\.round\b/i.test(name)?'circle':/\brunner\b/i.test(name)?'runner':/\bcustom\b/i.test(name)?'custom':/\.sq(?:\.|$)|\bsquare\b/i.test(name)?'square':undefined;
- return {id:file.id,order:match?.[1]||null,design:fileName,designId:file.id,sourceFileId:file.id,fileName,size,...(shape?{shape}:{}),quantity:1,quantityVerified:false,previewUrl:'/api/production/preview?id='+encodeURIComponent(file.id),source:'google_drive'};
+ return {id:file.id,order:match?.[1]||null,design:fileName,designId:file.id,sourceFileId:file.id,sourceModifiedAt:file.updated_at||null,fileName,size,...(shape?{shape}:{}),quantity:1,quantityVerified:false,previewUrl:'/api/production/preview?id='+encodeURIComponent(file.id),source:'google_drive'};
 }
 export function importDriveProduction(s,inventory){
  if(!inventory.rootId||!inventory.checkedAt||!Array.isArray(inventory.batches))throw Error('Drive inventory is incomplete');
@@ -24,5 +25,6 @@ export function importDriveProduction(s,inventory){
  detectProductionRollover(s,runs,inventory.checkedAt);
  s.snapshot.productionRuns={source:'google_drive',rootId:inventory.rootId,checkedAt:inventory.checkedAt,runs};
  s.snapshot.driveProduction={rootId:inventory.rootId,checkedAt:inventory.checkedAt,fileIds:[...seen],fileCount:seen.size,folderCount:runs.length,unmatchedCount:runs.reduce((n,r)=>n+r.unmatchedFiles.length,0),inventoryHash:createHash('sha256').update(JSON.stringify(inventory)).digest('hex')};
+ prepareEarlyPrescan(s);
  return {runs:runs.length,files:seen.size,orders:runs.reduce((n,r)=>n+r.orders.length,0),unmatched:s.snapshot.driveProduction.unmatchedCount};
 }

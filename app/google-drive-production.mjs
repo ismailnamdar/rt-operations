@@ -9,7 +9,15 @@ export class GoogleDriveProduction{
  async children(parent,filter){if(!/^[a-zA-Z0-9_-]+$/.test(parent))throw Error('Invalid Drive parent');const files=[];let pageToken;do{const page=await this.get('files',{q:`'${parent}' in parents and trashed = false and (${filter})`,pageSize:1000,fields:'nextPageToken,incompleteSearch,files(id,name,mimeType,parents,size,createdTime,modifiedTime)',supportsAllDrives:true,includeItemsFromAllDrives:true,...(pageToken?{pageToken}:{})});if(page.incompleteSearch||!Array.isArray(page.files))throw Error('Drive folder inventory incomplete');files.push(...page.files);pageToken=page.nextPageToken;}while(pageToken);return files;}
  async sync(store){const folders=(await this.children(this.rootId,"mimeType = 'application/vnd.google-apps.folder'")).filter(f=>/^pro\s*[_-]?\s*\d+$/i.test(f.name)),batches=[];
   for(const folder of folders){const files=await this.children(folder.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");batches.push({complete:true,folder:{id:folder.id,title:folder.name,parent_ids:folder.parents,created_at:folder.createdTime,url:'https://drive.google.com/drive/folders/'+folder.id},files:files.map(f=>({id:f.id,title:f.name,mime_type:f.mimeType,parent_ids:f.parents,size:f.size,created_at:f.createdTime,updated_at:f.modifiedTime}))});}
-  return store.transaction(s=>importDriveProduction(s,{rootId:this.rootId,checkedAt:new Date().toISOString(),batches}));
+  return store.transaction(s=>{const checkedAt=new Date().toISOString();s.driveFullInventoryAt=checkedAt;return importDriveProduction(s,{rootId:this.rootId,checkedAt,batches});});
+ }
+ async syncIntake(store){
+  const current=await store.read(),runs=current.snapshot.productionRuns?.runs||[],target=runs.find(r=>r.id===current.settings.upcomingProductionRunId);
+  if(!target?.folderId||current.snapshot.driveProduction?.rootId!==this.rootId)return {waitingForInventory:true};
+  const folder=await this.get('files/'+target.id,{fields:'id,parents,trashed',supportsAllDrives:true});if(folder.trashed||!folder.parents?.includes(this.rootId))throw Error('Upcoming production folder is outside verified intake');
+  const files=await this.children(target.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");
+  const batches=runs.map(run=>({complete:true,folder:{id:run.id,title:run.name,parent_ids:[this.rootId],created_at:run.folderCreatedAt,url:run.folderUrl},files:run.id===target.id?files.map(f=>({id:f.id,title:f.name,parent_ids:f.parents,updated_at:f.modifiedTime})):run.orders.flatMap(o=>o.rugs).concat(run.unmatchedFiles||[]).map(f=>({id:f.sourceFileId||f.id,title:f.fileName,parent_ids:[run.id],updated_at:f.sourceModifiedAt}))}));
+  return store.transaction(s=>{if(s.snapshot.driveProduction?.inventoryHash!==current.snapshot.driveProduction.inventoryHash)throw Error('Drive inventory changed during intake check; retry next sync');s.driveFullInventoryAt||=current.snapshot.driveProduction.checkedAt;return importDriveProduction(s,{rootId:this.rootId,checkedAt:new Date().toISOString(),batches});});
  }
  async returnRedoFile({fileId,folderId}){
   if(!this.writeEnabled)throw Error('Drive write authorization is required');
