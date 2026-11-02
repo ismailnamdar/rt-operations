@@ -45,9 +45,15 @@ export async function approveProductionAndBook({store,provider,user,id}){
  await store.transaction(s=>{const i=s.intents.find(i=>i.id===id);if(!i)fail('Prescanned shipment not found',404);if(i.booking)return i;checkReady(i);if(i.status!=='approved')fail('Booking is already running or requires reconciliation');if(!i.productionApprovedAt){i.productionApprovedAt=new Date().toISOString();i.productionApprovedBy=user.id;record(s,'owner_booking_approved',user,{intentId:id,productionId:i.approved.productionId});}return i;});
  return scanAndBook({store,provider,user,id,queuePrint:false});
 }
-export function enqueuePrint(s,user,i,reprint){
+export function assertLabelPrintable(s,i){
+ if(!i?.booking)fail('No booked label to print');
  if(i.fulfillmentPending)fail('Shopify tracking/fulfillment verification must complete before printing');
  if(i.redoHold)fail('Redo requested; resolve the affected rugs before printing labels');
+ if(i.status==='held'||i.sourceChangedHold||i.approved.hold||i.approved.pickup)fail('Order is held or pickup; printing is blocked');
+ for(const number of i.approved.orders){const config=s.productionPrescan?.[i.approved.productionId]?.orders?.[String(number)],commerce=s.shopifyOrders?.[String(number)],stage=s.orderStages?.[String(number)]?.stage;if(['hold','pickup'].includes(config?.disposition)||commerce?.tags?.some(t=>/^hold$|^pickup$|^shuttle:\s*(hold|pickup)$/i.test(t)))fail('Order is held or pickup; printing is blocked');if(['in transit','delivered'].includes(stage))fail('Carrier has accepted or delivered the shipment; review before printing another label');}
+}
+export function enqueuePrint(s,user,i,reprint){
+ assertLabelPrintable(s,i);
  if(!i.booking)fail('No booked label to print');if(!reprint&&s.printJobs.some(j=>j.intentId===i.id&&['queued','claimed','spooled','uncertain'].includes(j.status)))return null;
  const job={id:randomUUID(),requestedBy:user.id,requestedByLabel:user.name||user.email||user.id,intentId:i.id,bookingId:i.booking.id,carrier:i.booking.carrier,format:i.booking.format||'PDF',status:i.booking.format==='ZPL'?'queued':'manual_required',isTest:i.booking.isTest===true,reprint,createdAt:new Date().toISOString()};s.printJobs.push(job);record(s,reprint?'reprint_requested':'print_queued',user,{intentId:i.id,printJobId:job.id});return job;
 }

@@ -20,7 +20,7 @@ export function renderPrescanPanel(card,report,worker,api,refresh,toast){
   const value=draft.orders.get(row.order)||{order:row.order,disposition:row.disposition,deadline:row.deadline,note:row.note,applyAddressOverride:row.addressOverrideApplied,destination:{...row.destination}};draft.orders.set(row.order,value);
   if(row.destination)details.append(el('p',[row.destination.name,row.destination.company,row.destination.street1,row.destination.street2,row.destination.city,row.destination.state,row.destination.zip].filter(Boolean).join(' · ')));
   if(row.packing?.box)details.append(el('p','Package: '+row.packing.box.join(' × ')+' in · '+row.packing.lb+' lb'));
-  for(const issue of row.issues)details.append(el('p',issue));
+  for(const issue of row.issues)details.append(el('p',issue));for(const warning of row.addressWarnings||[])details.append(el('p','Address warning: '+(warning.message||warning)));
   for(const label of row.existingLabels||[])details.append(el('p','Existing label: '+(label.carrier||label.source||'Parsel')+' · '+label.tracking+' · '+(label.status||'status needs verification')));
   if(row.rate)details.append(el('p','Handoff: '+row.shipDate+' · Estimated arrival: '+(row.rate.arrival||'Not provided')+' · Verified: '+row.verifiedAt));
   const disposition=el('select');disposition.setAttribute('aria-label','Shipping disposition for #'+row.order);for(const [id,text] of [['include','Include'],['hold','Hold'],['pickup','Pickup']]){const option=el('option',text);option.value=id;disposition.append(option);}disposition.value=value.disposition;disposition.onchange=()=>{value.disposition=disposition.value;dirty();};details.append(disposition);

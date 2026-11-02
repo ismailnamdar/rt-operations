@@ -115,3 +115,7 @@ body[data-hosted-role="warehouse"] #view-calendar> :not(#production-run-content)
 .gideon-conversation>[aria-label="Gideon conversation"]{max-height:220px;overflow:auto;white-space:pre-wrap}
 .gideon-conversation article{padding:9px 0;border-top:1px solid #edf0ed}
 .control-center-item>label:has(input[type=checkbox]){display:flex;gap:9px;align-items:flex-start;margin:16px 0;font-size:12px;line-height:1.5}
+
+.order-address-info{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;margin-left:5px;padding:0;border:1px solid #c73434;border-radius:50%;background:#fff0f0;color:#ba2424;font:700 11px/1 system-ui;cursor:pointer;vertical-align:middle}
+.order-address-info:focus-visible{outline:2px solid #b52a2a;outline-offset:3px}
+.address-issues-dialog p{white-space:pre-wrap;line-height:1.5}

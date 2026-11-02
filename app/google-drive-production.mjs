@@ -11,8 +11,8 @@ export class GoogleDriveProduction{
   for(const folder of folders){const files=await this.children(folder.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");batches.push({complete:true,folder:{id:folder.id,title:folder.name,parent_ids:folder.parents,created_at:folder.createdTime,url:'https://drive.google.com/drive/folders/'+folder.id},files:files.map(f=>({id:f.id,title:f.name,mime_type:f.mimeType,parent_ids:f.parents,size:f.size,created_at:f.createdTime,updated_at:f.modifiedTime}))});}
   return store.transaction(s=>{const checkedAt=new Date().toISOString();s.driveFullInventoryAt=checkedAt;return importDriveProduction(s,{rootId:this.rootId,checkedAt,batches});});
  }
- async syncIntake(store){
-  const current=await store.read(),runs=current.snapshot.productionRuns?.runs||[],target=runs.find(r=>r.id===current.settings.upcomingProductionRunId);
+ async syncIntake(store,runId=null){
+  const current=await store.read(),runs=current.snapshot.productionRuns?.runs||[],target=runs.find(r=>r.id===(runId||current.settings.upcomingProductionRunId));
   if(!target?.folderId||current.snapshot.driveProduction?.rootId!==this.rootId)return {waitingForInventory:true};
   const folder=await this.get('files/'+target.id,{fields:'id,parents,trashed',supportsAllDrives:true});if(folder.trashed||!folder.parents?.includes(this.rootId))throw Error('Upcoming production folder is outside verified intake');
   const files=await this.children(target.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");

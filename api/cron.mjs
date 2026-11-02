@@ -1,3 +1,4 @@
+import {processProductionRefresh} from '../app/production-refresh.mjs';
 import {syncGmail} from '../app/gmail-sync.mjs';
 import {prepareScriptedDrafts} from '../app/scripted-drafts.mjs';
 import {processDriveRedo} from '../app/drive-redo.mjs';
@@ -18,6 +19,7 @@ export async function runScheduled(app){
    if(current.shopifyImport?.status!=='complete')await importLatestOrders({store:app.store,client:app.client,pages:1});
    else {if(current.shopifyExpeditedScan?.status!=='complete')await syncPaidShippingOrders({store:app.store,client:app.client,pages:1});await syncChangedOrders({store:app.store,client:app.client,pages:1});await processShopifyUpdates({store:app.store,client:app.client,limit:2});if(app.env.SHOPIFY_TAG_SYNC==='1')await syncShopifyStatuses({store:app.store,client:app.client,limit:4,deadline:Date.now()+45000});}
   }]);
+  if(app.client)tasks.push(['productionRefresh',()=>processProductionRefresh({store:app.store,client:app.client,limit:12,deadline:Date.now()+20000})]);
   const settled=await Promise.allSettled(tasks.map(([,run])=>run())),sources=Object.fromEntries(settled.map((result,i)=>[tasks[i][0],{status:result.status==='fulfilled'&&result.value?.status!=='needs_attention'?'complete':'needs_attention'}]));
   if(app.livePrescan){try{const result=await app.livePrescan.run();sources.prescan={status:'complete'};await app.store.transaction(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'complete',...result};});}catch(error){sources.prescan={status:'needs_attention'};await app.store.transaction(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'needs_attention',message:error.message};});}}
   const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
