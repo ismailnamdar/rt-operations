@@ -24,7 +24,7 @@ export function validateDeployment(env){
 export async function createVercelRuntime({env=process.env,store,client,authFetch=fetch}={}){
  const {canonical:origin,allowed:allowedOrigins}=validateDeployment(env);store||=await createStore({databaseUrl:env.DATABASE_URL,databaseCa:env.DATABASE_CA_CERT,schema:'shuttle_hosted'});
  client??=createShopifyConnection(env,{store,origin});
- if(env.SHOPIFY_STORE)await store.transaction(s=>{if(s.shopifyConnection?.shop&&s.shopifyConnection.shop!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');s.shopifyConnection={...s.shopifyConnection,shop:env.SHOPIFY_STORE};});
+ if(env.SHOPIFY_STORE){const existing=(await store.read()).shopifyConnection?.shop;if(existing&&existing!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');if(!existing)await store.transaction(s=>{if(s.shopifyConnection?.shop&&s.shopifyConnection.shop!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');s.shopifyConnection={...s.shopifyConnection,shop:env.SHOPIFY_STORE};});}
  // Fail closed without live Parsel verification; never fall back to the mock buyer.
  const provider=shippingProvider(env);
  const livePrescan=env.PARSEL_TOKEN&&client?new LivePrescan({store,client,carrier:new ParselCarrier({token:env.PARSEL_TOKEN,baseUrl:env.PARSEL_BASE_URL||'https://api.parsel.app',liveBooking:false})}):null;
