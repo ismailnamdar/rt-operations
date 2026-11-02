@@ -10,6 +10,7 @@ test('revision, conditional and obsolete-proof cases never become flat approvals
  const newer={...proof,id:'newproof',date:'2026-11-01T12:00:00Z',text:'Here is the updated mock-up.'};const old=item('Approved');old.conversation.push(newer);assert.equal(classifyReviewConversation(old).group,'proof');
  const quoted=item('Please refund my order.\nOn Monday somebody wrote:\nLooks good, approved!');assert.equal(classifyReviewConversation(quoted).group,'billing');
  const noContext=item('Approved',{conversation:[]});assert.equal(classifyReviewConversation(noContext).group,'other');
+ assert.equal(classifyReviewConversation(item('This is not approved.')).group,'proof');assert.equal(classifyReviewConversation(item('Looks good, but I need it tomorrow.')).group,'approval_needs_reply');
 });
 test('all conversations are grouped without dropping read/archived carryover, changing edits or enabling sends',()=>{
  const samples=['Looks good, thank you!','Looks good, can you confirm delivery?','Please refund my order','Where is my order?','Can I get a quote for a custom rug?','We need a delivery date for Friday','I cannot open the proof attachment','Please replace the damaged rug'];
