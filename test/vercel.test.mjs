@@ -11,6 +11,9 @@ test('serverless runtime uses Supabase login, blocks legacy setup and preserves 
  const setup=await send('/auth/bootstrap',{email:env.SHUTTLE_OWNER_EMAIL,password},{Authorization:'Bearer '+env.SHUTTLE_SETUP_TOKEN});assert.equal(setup.status,409);
  const auth=await send('/auth/login',{email:env.SHUTTLE_OWNER_EMAIL,password});assert.equal(auth.status,200);assert.match(auth.headers.get('set-cookie'),/Secure/);const cookie=auth.headers.get('set-cookie').split(';')[0];
  const state=await(await fetch(base+'/api/state',{headers:{Cookie:cookie}})).json();assert.equal(state.hosted.transport,'poll');assert.equal(state.hosted.demo,false);assert.equal(state.users,undefined);assert.equal(state.hosted.gmail.sendingEnabled,false);assert.equal(state.hosted.gmail.configured,true);
+ const priorRead=store.read;let fullReads=0;store.authRead=async()=>{const s=await priorRead();return {users:s.users,sessions:s.sessions};};store.revision=async()=>String((await priorRead()).revision);store.read=async()=>{fullReads++;return priorRead();};
+ const revision=await store.revision(),unchanged=await fetch(base+'/api/live?since='+revision,{headers:{Cookie:cookie}});assert.deepEqual(await unchanged.json(),{revision,unchanged:true});assert.equal(fullReads,0);
+ assert.equal((await fetch(base+'/api/live?since='+revision)).status,401);store.read=priorRead;
  assert.equal((await send('/api/gmail/sync',{}, {Cookie:cookie})).status,403);
  assert.equal((await send('/api/approve',{items:[],requestId:'blocked-send'},{Cookie:cookie,'X-Shuttle-Token':state.token})).status,503);
  const events=await(await fetch(base+'/api/events',{headers:{Cookie:cookie}})).json();assert.equal(events.transport,'poll');

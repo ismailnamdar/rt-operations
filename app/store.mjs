@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {partitionedStore} from './partitioned-store.mjs';
 export const blank = () => ({version:1,revision:0,users:[],sessions:[],intents:[],printJobs:[],jobs:[],events:[],settings:{upcomingProductionRunId:'1nOvYd0k_GgVfUcRVckBpMG1NvHVTiqgC',autoPrintUPS:true,autoPrintFedEx:true},snapshot:{results:{review:[],questions:[],gallery:[],history:[],alerts:[],updatedAt:new Date().toISOString(),sourceLabel:'Hosted migration — no live accounts connected'},runs:[],pipeline:{orders:[]},unfulfilled:{orders:[],inventoryComplete:false},schedule:{days:[],version:'initial'},expedited:{orders:[]},mockupBatches:{batches:[]},emailTemplates:[],lukasTodos:[]}});
 export async function initializeWorkflowTable(pool,schema){
  if(schema&&!/^[a-z][a-z0-9_]*$/.test(schema))throw Error('Invalid database schema');
@@ -13,13 +14,14 @@ export async function initializeWorkflowTable(pool,schema){
  if(!existing?.seeded)await pool.query('INSERT INTO '+table+'(id,payload) VALUES(1,$1) ON CONFLICT DO NOTHING',[blank()]);
  return table;
 }
-export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/state.json',databaseUrl=process.env.DATABASE_URL,databaseCa=process.env.DATABASE_CA_CERT,schema=null}={}) {
+export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/state.json',databaseUrl=process.env.DATABASE_URL,databaseCa=process.env.DATABASE_CA_CERT,schema=null,partitioned=process.env.SHUTTLE_PARTITIONED_STORAGE==='1'}={}) {
   if(databaseUrl){
     // A provided CA enforces verified TLS; URL ssl* parameters would otherwise override it in pg.
     let connectionString=databaseUrl,ssl;if(databaseCa){const url=new URL(databaseUrl);for(const k of [...url.searchParams.keys()])if(k.startsWith('ssl'))url.searchParams.delete(k);connectionString=url.href;ssl={ca:databaseCa.replace(/\\n/g,'\n'),rejectUnauthorized:true};}
     const {Pool}=await import('pg');const pool=new Pool({connectionString,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:5000,query_timeout:10000});
     let table;try{table=await initializeWorkflowTable(pool,schema);}catch(error){await pool.end().catch(()=>{});throw error;}
-    return {read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
+    if(partitioned)try{return await partitionedStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
+    return {authRead:async()=>(await pool.query("SELECT jsonb_build_object('users',payload->'users','sessions',payload->'sessions') AS payload FROM "+table+' WHERE id=1')).rows[0].payload,revision:async()=>String((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
       transaction:fn=>workflowTransaction(pool,table,fn),close:()=>pool.end()};
   }
   let tail=Promise.resolve();

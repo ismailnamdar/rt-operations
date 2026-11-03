@@ -14,8 +14,8 @@ for(const dir of ['api','app']){
   modules++;
  }
 }
-for(const name of ['index','cron','shopify-webhook'])await import(new URL('../api/'+name+'.mjs',import.meta.url));
-console.log(`SHUTTLE preflight passed: ${modules} source modules and all 3 function import graphs. No provider calls made.`);
+for(const name of ['index','cron','shopify-webhook','gmail-push'])await import(new URL('../api/'+name+'.mjs',import.meta.url));
+console.log(`SHUTTLE preflight passed: ${modules} source modules and all 4 function import graphs. No provider calls made.`);
 await fs.mkdir(path.join(root,'dist'),{recursive:true});
 await fs.writeFile(path.join(root,'dist','.gitkeep'),'');
 console.log('SHUTTLE serverless files prepared. Private configuration is supplied at runtime.');

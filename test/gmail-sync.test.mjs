@@ -73,3 +73,17 @@ test('unchanged recent carryover is retained without being repeatedly downloaded
  const store=await fixture(t);await store.transaction(s=>{mergeGmailThread(s,thread('one'),mailbox);s.gmailSync.pending={};s.gmailSync.unread={complete:true,count:0};s.gmailSync.sampleComplete=true;s.gmailSync.historyId='100';});let reads=0;await syncGmail({store,gmail:client({getThread:async id=>{reads++;return thread(id);}})});assert.equal(reads,0);assert.equal((await store.read()).gmailCarryover['m-one'].status,'unresolved');
 });
 test('Google Retry-After values are honored',()=>{assert.equal(retryDelay('120'),120000);assert.equal(retryDelay('invalid'),0);});
+
+test('four independent reads overlap, persist as one group and retain a failed sibling',async t=>{
+ const store=await fixture(t);await store.transaction(s=>{s.gmailSync={pending:Object.fromEntries(['a','b','c','d'].map(id=>[id,{attempts:0,queuedAt:'2020-01-01'}])),unread:{complete:true,count:0},sampleComplete:true,historyId:'100'};});
+ let active=0,peak=0,release;const gate=new Promise(r=>release=r),gmail=client({getThread:async id=>{active++;peak=Math.max(peak,active);if(active===4)release();await gate;active--;if(id==='c')throw Object.assign(Error('throttled'),{providerStatus:429,retryAfterMs:120000});return thread(id);}});
+ await syncGmail({store,gmail,limit:4});const s=await store.read();assert.equal(peak,4);assert.equal(s.snapshot.results.review.length,3);assert.ok(s.gmailSync.pending.c.nextEligibleAt>Date.now()+110000);assert.equal(s.gmailCarryover['m-a'].status,'unresolved');assert.equal(s.jobs.length,0);
+});
+test('history updates outrank old backlog even while initial unread coverage is incomplete',async t=>{
+ const store=await fixture(t);await store.transaction(s=>{s.gmailSync={pending:{old:{queuedAt:'2020-01-01',attempts:0}},unread:{complete:false,count:0,pageToken:'older'},sampleComplete:true,historyId:'100'};});const read=[];
+ await syncGmail({store,gmail:client({listMessages:async()=>({messages:[],nextPageToken:'more-old'}),history:async()=>({historyId:'101',history:[{messagesAdded:[{message:{id:'new',threadId:'fresh'}}]}]}),getThread:async id=>{read.push(id);return thread(id);}}),limit:1,pages:1});assert.deepEqual(read,['fresh']);const s=await store.read();assert.ok(s.gmailSync.pending.old);assert.equal(s.gmailSync.unread.complete,false);
+});
+test('prescan starts while Gmail waits rather than after the mailbox backlog',async t=>{
+ const store=await fixture(t);let started=false;
+ const result=await runScheduled({store,env:{},gmail:client({verifyMailbox:async()=>{await new Promise(r=>setImmediate(r));assert.equal(started,true);return {emailAddress:mailbox,historyId:'100'};}}),livePrescan:{run:async()=>{started=true;return {checked:0};}}});assert.equal(result.sources.prescan.status,'complete');
+});

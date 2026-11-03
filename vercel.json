@@ -7,6 +7,7 @@
   "routes": [
     {"src": "/", "dest": "/api/index?__shuttle_path=/"},
     {"handle": "filesystem"},
+    {"src": "/api/gmail/push", "dest": "/api/gmail-push"},
     {"src": "/api/shopify/webhook", "dest": "/api/shopify-webhook"},
     {"src": "/(.*)", "dest": "/api/index?__shuttle_path=/$1"}
   ],

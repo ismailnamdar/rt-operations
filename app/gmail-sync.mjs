@@ -13,10 +13,10 @@ const now=()=>new Date().toISOString();
 function incoming(m,mailbox){if((m.labelIds||[]).some(x=>['TRASH','SENT','DRAFT'].includes(x)))return false;const from=header(m,'From'),address=from.match(/<([^<>]+)>/)?.[1]||from.trim();return address.toLowerCase()!==mailbox.toLowerCase();}
 function plain(part){if(!part)return '';if(part.mimeType==='text/plain'&&part.body?.data)return Buffer.from(part.body.data,'base64url').toString('utf8');return (part.parts||[]).map(plain).filter(Boolean).join('\n');}
 function initialize(s){s.gmailSync||={pending:{},phase:'initial',unread:{complete:false,count:0},sampleComplete:false};s.gmailSync.pending||={};s.gmailCarryover||={};s.gmailConversations||={};return s.gmailSync;}
-function enqueue(s,items,{urgent=false}={}){const sync=initialize(s);for(const item of items||[]){if(!idOK(item.threadId))throw Error('Gmail returned an invalid thread identity');sync.pending[item.threadId]||={queuedAt:now(),attempts:0};if(urgent){const entry=sync.pending[item.threadId];entry.priority=1;if(entry.blocked){delete entry.blocked;delete entry.nextEligibleAt;}}}}
+function enqueue(s,items,{urgent=false}={}){const sync=initialize(s);for(const item of items||[]){if(!idOK(item.threadId))throw Error('Gmail returned an invalid thread identity');sync.pending[item.threadId]||={queuedAt:now(),attempts:0};if(urgent){const entry=sync.pending[item.threadId];entry.priority=1;entry.generation=randomUUID();if(entry.blocked){delete entry.blocked;delete entry.nextEligibleAt;}}}}
 
 // Every incoming message retains its own obligation. Read/archive changes cannot resolve it.
-export function mergeGmailThread(s,thread,mailbox){
+export function mergeGmailThread(s,thread,mailbox,{organize=true}={}){
  if(!idOK(thread?.id)||!Array.isArray(thread.messages)||thread.messages.some(m=>!idOK(m.id)||m.threadId!==thread.id))throw Error('Gmail conversation is incomplete');
  initialize(s);const messages=thread.messages.filter(m=>incoming(m,mailbox));
  for(const m of messages)s.gmailCarryover[m.id]||={messageId:m.id,threadId:thread.id,status:'unresolved',discoveredAt:now(),obligation:'Review incoming inquiry',nextAction:'Review the full current conversation; no automated send or production action.'};
@@ -33,10 +33,10 @@ export function mergeGmailThread(s,thread,mailbox){
  item.version=existing&&prior?.sourceVersion===sourceVersion?existing.version:fingerprint({threadId:thread.id,sourceVersion,body:item.body});
  if(existing)Object.assign(existing,item);else s.snapshot.results.review.push(item);
  for(const entry of unresolved){entry.reviewId=reviewId;entry.lastVerifiedAt=now();entry.blocker=validRecipient?null:'Sender address needs owner verification';}
- s.snapshot.results.updatedAt=now();s.snapshot.results.sourceLabel='Live Gmail — sending disabled';organizeReviewCategories(s);
+ s.snapshot.results.updatedAt=now();s.snapshot.results.sourceLabel='Live Gmail — sending disabled';if(organize)organizeReviewCategories(s);
 }
 
-export async function syncGmail({store,gmail,limit=20,pages=2,deadline=Date.now()+45000,labelSync=false}){
+export async function syncGmail({store,gmail,limit=80,pages=2,deadline=Date.now()+45000,labelSync=false,concurrency=4}){
  if(!gmail?.configured())return {configured:false};const lease=randomUUID();
  const claimed=await store.transaction(s=>{const sync=initialize(s);if(sync.leaseUntil>Date.now())return false;sync.lease=lease;sync.leaseUntil=Date.now()+120000;return true;});if(!claimed)return {busy:true};
  const mutate=fn=>store.transaction(s=>{if(s.gmailSync?.lease!==lease)throw Error('Gmail synchronization lease changed');return fn(s);});
@@ -50,6 +50,17 @@ export async function syncGmail({store,gmail,limit=20,pages=2,deadline=Date.now(
    }
   });
   let state=await store.read();
+  let historyExpired=false;
+  // History pages are durably queued before committing their cursor. Hydration may resume later.
+  for(let p=0;p<pages&&Date.now()<deadline;p++){
+   state=await store.read();const sync=state.gmailSync;
+   let page;try{page=await gmail.history({startHistoryId:sync.historyId,pageToken:sync.historyPageToken});}catch(e){if(e.providerStatus!==404)throw e;historyExpired=true;await mutate(s=>{s.gmailSync.historyId=profile.historyId;s.gmailSync.historyPageToken=null;s.gmailSync.sampleComplete=false;s.gmailSync.unread={complete:false,count:0};s.gmailSync.recoveryScan={complete:false,pageToken:null};s.gmailSync.recovery='History expired: full incoming-mail recovery queued, including archived and Spam; existing inquiries retained.';});break;}
+   if(!/^\d+$/.test(page.historyId||'')||page.nextPageToken===sync.historyPageToken&&page.nextPageToken)throw Error('Incomplete Gmail history');
+   const changed=(page.history||[]).flatMap(h=>[...(h.messages||[]),...['messagesAdded','messagesDeleted','labelsAdded','labelsRemoved'].flatMap(key=>(h[key]||[]).map(x=>x.message))]);
+   await mutate(s=>{enqueue(s,changed,{urgent:true});s.gmailSync.historyPageToken=page.nextPageToken||null;if(!page.nextPageToken)s.gmailSync.historyId=page.historyId;});if(!page.nextPageToken)break;
+  }
+  state=await store.read();
+  if(!historyExpired){
   if(!state.gmailSync.sampleComplete&&Date.now()<deadline){const page=await gmail.listMessages({query:SAMPLE_QUERY,maxResults:50});if(!Array.isArray(page.messages||[]))throw Error('Invalid Gmail sample');await mutate(s=>{enqueue(s,page.messages);s.gmailSync.sampleComplete=true;});}
   for(let p=0;p<pages&&Date.now()<deadline;p++){
    state=await store.read();const recovery=state.gmailSync.recoveryScan;if(!recovery||recovery.complete)break;
@@ -63,20 +74,16 @@ export async function syncGmail({store,gmail,limit=20,pages=2,deadline=Date.now(
    if(!Array.isArray(page.messages||[])||page.nextPageToken===scan.pageToken&&page.nextPageToken)throw Error('Incomplete Gmail pagination');
    await mutate(s=>{enqueue(s,page.messages);const u=s.gmailSync.unread;u.pageToken=page.nextPageToken||null;u.count+=(page.messages||[]).length;u.complete=!page.nextPageToken;if(u.complete)u.completedAt=now();});
   }
-  // History pages are durably queued before committing their cursor. Hydration may resume later.
-  for(let p=0;p<pages&&Date.now()<deadline;p++){
-   state=await store.read();const sync=state.gmailSync;if(!sync.unread.complete||sync.recoveryScan?.complete===false)break;
-   let page;try{page=await gmail.history({startHistoryId:sync.historyId,pageToken:sync.historyPageToken});}catch(e){if(e.providerStatus!==404)throw e;await mutate(s=>{s.gmailSync.historyId=profile.historyId;s.gmailSync.historyPageToken=null;s.gmailSync.sampleComplete=false;s.gmailSync.unread={complete:false,count:0};s.gmailSync.recoveryScan={complete:false,pageToken:null};s.gmailSync.recovery='History expired: full incoming-mail recovery queued, including archived and Spam; existing inquiries retained.';});break;}
-   if(!/^\d+$/.test(page.historyId||'')||page.nextPageToken===sync.historyPageToken&&page.nextPageToken)throw Error('Incomplete Gmail history');
-   const changed=(page.history||[]).flatMap(h=>[...(h.messages||[]),...['messagesAdded','messagesDeleted','labelsAdded','labelsRemoved'].flatMap(key=>(h[key]||[]).map(x=>x.message))]);
-   await mutate(s=>{enqueue(s,changed,{urgent:true});s.gmailSync.historyPageToken=page.nextPageToken||null;if(!page.nextPageToken)s.gmailSync.historyId=page.historyId;});if(!page.nextPageToken)break;
   }
-  let hydrated=0;
-  while(hydrated<limit&&Date.now()<deadline){state=await store.read();const entry=Object.entries(state.gmailSync.pending).filter(([,x])=>(!x.blocked||x.providerStatus===404)&&(!x.nextEligibleAt||x.nextEligibleAt<=Date.now())).sort((a,b)=>(b[1].priority||0)-(a[1].priority||0)||String(a[1].queuedAt).localeCompare(String(b[1].queuedAt)))[0];if(!entry)break;const [id]=entry;
-   try{const thread=await gmail.getThread(id);if(thread.id!==id)throw Error('Gmail returned a different conversation');await mutate(s=>{mergeGmailThread(s,thread,gmail.mailbox);});
-    if(labelSync){const receipt=await gmail.applyReviewLabel(thread);await mutate(s=>{s.gmailConversations[id].labelReceipt={...receipt,verifiedAt:now(),operation:'add-label-only'};});}
-    await mutate(s=>{delete s.gmailSync.pending[id];});hydrated++;}
-   catch(e){await mutate(s=>{const pending=s.gmailSync.pending[id];pending.providerStatus=Number.isInteger(e.providerStatus)?e.providerStatus:null;pending.attempts++;pending.blocked=[400,401,403,404].includes(e.providerStatus);pending.nextEligibleAt=Date.now()+(pending.blocked?86400000:Math.max(e.retryAfterMs||0,Math.min(120000,30000*2**Math.min(pending.attempts-1,2))));pending.error=e.providerStatus===404?'Conversation unavailable; inquiry retained for owner review.':pending.blocked?'Google access or source requires owner attention; normal retries paused.':'Conversation read failed; retry retained.';for(const entry of Object.values(s.gmailCarryover))if(entry.threadId===id&&entry.status==='unresolved')entry.blocker=pending.error;});hydrated++;}
+  let hydrated=0;const width=Math.max(1,Math.min(6,Math.floor(concurrency)||4));
+  while(hydrated<limit&&Date.now()<deadline-1500){
+   state=await store.read();const batch=Object.entries(state.gmailSync.pending).filter(([,x])=>(!x.blocked||x.providerStatus===404)&&(!x.nextEligibleAt||x.nextEligibleAt<=Date.now())).sort((a,b)=>(b[1].priority||0)-(a[1].priority||0)||String(a[1].queuedAt).localeCompare(String(b[1].queuedAt))).slice(0,Math.min(width,limit-hydrated));if(!batch.length)break;
+   const results=await Promise.all(batch.map(async([id,entry])=>{try{const thread=await gmail.getThread(id);if(thread.id!==id)throw Error('Gmail returned a different conversation');return {id,generation:entry.generation,thread};}catch(error){return {id,generation:entry.generation,error};}}));
+   const failure=(s,result,error)=>{const pending=s.gmailSync.pending[result.id];if(!pending||pending.generation!==result.generation)return;pending.providerStatus=Number.isInteger(error.providerStatus)?error.providerStatus:null;pending.attempts=(pending.attempts||0)+1;pending.blocked=[400,401,403,404].includes(error.providerStatus);pending.nextEligibleAt=Date.now()+(pending.blocked?86400000:Math.max(error.retryAfterMs||0,Math.min(120000,30000*2**Math.min(pending.attempts-1,2))));pending.error=error.providerStatus===404?'Conversation unavailable; inquiry retained for owner review.':pending.blocked?'Google access or source requires owner attention; normal retries paused.':'Conversation read failed; retry retained.';for(const entry of Object.values(s.gmailCarryover))if(entry.threadId===result.id&&entry.status==='unresolved')entry.blocker=pending.error;};
+   // Persist every discovered inquiry before any optional Gmail label write.
+   const persisted=await mutate(s=>{const saved=[];for(const r of results){if(r.error){failure(s,r,r.error);continue;}try{mergeGmailThread(s,r.thread,gmail.mailbox,{organize:false});saved.push(r.id);if(!labelSync&&s.gmailSync.pending[r.id]?.generation===r.generation)delete s.gmailSync.pending[r.id];}catch(error){failure(s,r,error);}}organizeReviewCategories(s);return saved;});
+   if(labelSync){const receipts=await Promise.all(results.filter(r=>persisted.includes(r.id)).map(async r=>{try{return {...r,receipt:await gmail.applyReviewLabel(r.thread)};}catch(error){return {...r,error};}}));await mutate(s=>{for(const r of receipts){if(r.error){failure(s,r,r.error);continue;}s.gmailConversations[r.id].labelReceipt={...r.receipt,verifiedAt:now(),operation:'add-label-only'};if(s.gmailSync.pending[r.id]?.generation===r.generation)delete s.gmailSync.pending[r.id];}});}
+   hydrated+=batch.length;
   }
   return await mutate(s=>{prepareScriptedDrafts(s);const sync=s.gmailSync,failed=Object.values(sync.pending).some(x=>x.error);sync.status=failed?'needs_attention':sync.unread.complete&&sync.recoveryScan?.complete!==false&&!Object.keys(sync.pending).length&&!sync.historyPageToken?'current':'syncing';sync.lastSuccessAt=now();delete sync.error;s.snapshot.gmailSync={status:sync.status,lastSuccessAt:sync.lastSuccessAt,mailbox:sync.mailbox,pendingThreads:Object.keys(sync.pending).length,unreadEnumerationComplete:sync.unread.complete,unreadMessagesEnumerated:sync.unread.count,failedByProviderStatus:Object.values(sync.pending).filter(x=>x.error).reduce((counts,x)=>{const key=String(x.providerStatus||'unknown');counts[key]=(counts[key]||0)+1;return counts;},{}),recovery:sync.recovery||null,sendingEnabled:false};return s.snapshot.gmailSync;});
  }catch(error){await mutate(s=>{s.gmailSync.status='needs_attention';s.gmailSync.error='Google synchronization failed; current inquiries and pagination are retained.';s.snapshot.gmailSync={...s.snapshot.gmailSync,status:'needs_attention',error:s.gmailSync.error,sendingEnabled:false};});throw Error('Google synchronization needs attention; pending work is retained.');}
