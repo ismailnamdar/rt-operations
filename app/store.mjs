@@ -17,12 +17,14 @@ export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/sta
   if(databaseUrl){
     // A provided CA enforces verified TLS; URL ssl* parameters would otherwise override it in pg.
     let connectionString=databaseUrl,ssl;if(databaseCa){const url=new URL(databaseUrl);for(const k of [...url.searchParams.keys()])if(k.startsWith('ssl'))url.searchParams.delete(k);connectionString=url.href;ssl={ca:databaseCa.replace(/\\n/g,'\n'),rejectUnauthorized:true};}
-    const {Pool}=await import('pg');const pool=new Pool({connectionString,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000});
-    const table=await initializeWorkflowTable(pool,schema);
+    const {Pool}=await import('pg');const pool=new Pool({connectionString,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:5000,query_timeout:10000});
+    let table;try{table=await initializeWorkflowTable(pool,schema);}catch(error){await pool.end().catch(()=>{});throw error;}
     return {read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
-      transaction:async fn=>{const c=await pool.connect();try{await c.query('BEGIN');const s=(await c.query('SELECT payload FROM '+table+' WHERE id=1 FOR UPDATE')).rows[0].payload;const result=await fn(s);s.revision++;await c.query('UPDATE '+table+' SET payload=$1 WHERE id=1',[s]);await c.query('COMMIT');return structuredClone(result);}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}},close:()=>pool.end()};
+      transaction:fn=>workflowTransaction(pool,table,fn),close:()=>pool.end()};
   }
   let tail=Promise.resolve();
   async function read(){try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return blank();throw e;}}
   return {read,transaction:fn=>{const job=tail.then(async()=>{const s=await read(),result=await fn(s);s.revision++;await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});const temp=file+'.'+randomUUID()+'.tmp';await fs.writeFile(temp,JSON.stringify(s),{mode:0o600});await fs.rename(temp,file);return structuredClone(result);});tail=job.catch(()=>{});return job;},close:async()=>{await tail;}};
 }
+
+export async function workflowTransaction(pool,table,fn){const c=await pool.connect();let discarded=false;try{await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='3s'");await c.query("SET LOCAL statement_timeout='8s'");const s=(await c.query('SELECT payload FROM '+table+' WHERE id=1 FOR UPDATE')).rows[0].payload;const result=await fn(s);s.revision++;await c.query('UPDATE '+table+' SET payload=$1 WHERE id=1',[s]);await c.query('COMMIT');return structuredClone(result);}catch(e){try{await c.query('ROLLBACK');}catch{discarded=true;c.release(true);throw e;}throw e;}finally{if(!discarded)c.release();}}
