@@ -3,7 +3,8 @@ import {fingerprint} from './shipping.mjs';
 // Suggestions only: no Gmail writes, inferred approval, invoice edits or production moves.
 export function prepareScriptedDrafts(s,{now=Date.now()}={}){
  const stats={drafted:0,needsContext:0,preserved:0};
- for(const item of s.snapshot.results.review){
+ for(const current of s.snapshot.results.review){
+  const item=structuredClone(current);
   if(!item.gmailManaged||item.status!=='pending')continue;
   const previous=item.scriptedDraft;
   if(item.body&&(!previous||fingerprint(item.body)!==previous.bodyHash)){stats.preserved++;continue;}
@@ -34,7 +35,7 @@ export function prepareScriptedDrafts(s,{now=Date.now()}={}){
   // Do not leave a stale generated answer looking current after its facts change.
   if(!body||reasons.length){if(previous&&item.body&&fingerprint(item.body)===previous.bodyHash)item.body='';item.scriptedDraft={status:'needs_context',reasons,checkedAt:new Date(now).toISOString()};item.replyDisposition={reason:reasons.join(' ')};stats.needsContext++;}
   else {item.body=`Hi,\n\n${body}`;item.scriptedDraft={status:'suggested',rule,sourceVersion:item.sourceVersion,bodyHash:fingerprint(item.body),checkedAt:new Date(now).toISOString(),note:'Rule-based suggestion; owner review and canonical signature required before sending.'};item.replyDisposition={reason:'Scripted suggestion ready for review; sending remains disabled.'};stats.drafted++;}
-  item.sendBlocked=true;item.requiresInput=true;item.version=fingerprint({source:item.sourceVersion,body:item.body,scriptedDraft:item.scriptedDraft});
+  item.sendBlocked=true;item.requiresInput=true;const stableDraft={...item.scriptedDraft};delete stableDraft.checkedAt;item.version=fingerprint({source:item.sourceVersion,body:item.body,scriptedDraft:stableDraft});if(current.version!==item.version||JSON.stringify(current.replyDisposition)!==JSON.stringify(item.replyDisposition))Object.assign(current,item);
  }
  s.snapshot.scriptedDrafts={...stats,checkedAt:new Date(now).toISOString(),sendingEnabled:false};return stats;
 }

@@ -99,6 +99,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    if(url.pathname==='/api/team/invite')result=supabaseAuth?await authorizeSupabaseStaff(store,user,b):await inviteUser(store,user,b,origin);
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
    else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
+   else if(url.pathname==='/api/storage/upgrade'){requireRole(user,['owner']);if(!store.upgradeStorage)fail('Database storage optimization is unavailable',503);result=await store.upgradeStorage();}
    else if(url.pathname==='/api/integrations/check')result=await checkIntegrations({store,user,gmail,drive,provider,parselProbe,emailSendingEnabled});
    else if(url.pathname==='/api/review/ai'){requireRole(user,['owner']);result=await store.transaction(s=>requestReviewAI(s,user,b));}
    else if(url.pathname==='/api/gideon/message'){requireRole(user,['owner']);result=await store.transaction(s=>askGideon(s,user,b));}
