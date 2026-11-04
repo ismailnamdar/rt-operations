@@ -1,3 +1,4 @@
+import {schedulerStore} from './scheduler-store.mjs';
 import {stageStore} from './stage-store.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -24,7 +25,7 @@ export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/sta
     let table;try{table=await initializeWorkflowTable(pool,schema);}catch(error){await pool.end().catch(()=>{});throw error;}
     if(partitioned)try{return await partitionedStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
     let auth;try{auth=await createAuthSidecar(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
-    let stages;try{stages=await stageStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}return {...auth,...stages,revision:async()=>stages.stageRevision((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>stages.withStages(structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload)),
+    let stages;try{stages=await stageStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}let scheduler;try{scheduler=await schedulerStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}return {...auth,...stages,...scheduler,revision:async()=>{const base=await stages.stageRevision((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),n=await scheduler.schedulerRevision();return base+(n?'~'+n:'');},read:async()=>scheduler.withScheduler(await stages.withStages(structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload))),
       transaction:fn=>workflowTransaction(pool,table,fn),close:()=>pool.end()};
   }
   let tail=Promise.resolve();

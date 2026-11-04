@@ -11,7 +11,8 @@ import {syncPaidShippingOrders,importLatestOrders,processShopifyUpdates,syncChan
 import {syncVerifiedStatusTags} from '../app/shopify-status.mjs';
 import {randomUUID} from 'node:crypto';
 export async function runScheduled(app){
- const lease=randomUUID();const claimed=await app.store.transaction(s=>{if(s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
+ const metadata=app.store.schedulerTransaction||app.store.stageTransaction||app.store.transaction;
+ const lease=randomUUID();const claimed=await (app.store.schedulerTransaction||app.store.transaction)(s=>{if(s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
  try{
   const current=await app.store.read(),tasks=[];
   tasks.push(['stages',async()=>{if(current.productionFacts?.length)await (app.store.stageTransaction||app.store.transaction)(s=>{advanceProductionStages(s);});}]);
@@ -24,11 +25,11 @@ export async function runScheduled(app){
   }]);
   if(app.client&&!current.shopifyConnection?.revoked&&(app.env.SHOPIFY_TAG_SYNC!=='0'||current.settings.shopifyTagSyncEnabled))tasks.push(['shopifyStageTags',async()=>{if(current.settings.shopifyTagSyncEnabled===undefined)await (app.store.stageTransaction||app.store.transaction)(s=>{if(s.settings.shopifyTagSyncEnabled===undefined)s.settings.shopifyTagSyncEnabled=true;});return syncVerifiedStatusTags({store:app.store,client:app.client,limit:20});}]);
   if(app.client)tasks.push(['productionRefresh',()=>processProductionRefresh({store:app.store,client:app.client,limit:12,deadline:Date.now()+20000})]);
-  if(app.livePrescan)tasks.push(['prescan',async()=>{try{const result=await app.livePrescan.run();await (app.store.stageTransaction||app.store.transaction)(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'complete',...result};});return result;}catch(error){await (app.store.stageTransaction||app.store.transaction)(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'needs_attention',message:error.message};});throw error;}}]);
+  if(app.livePrescan)tasks.push(['prescan',async()=>{try{const result=await app.livePrescan.run();await metadata(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'complete',...result};});return result;}catch(error){await metadata(s=>{s.lastLivePrescan={at:new Date().toISOString(),status:'needs_attention',message:error.message};});throw error;}}]);
   const settled=await Promise.allSettled(tasks.map(([,run])=>run())),sources=Object.fromEntries(settled.map((result,i)=>[tasks[i][0],{status:result.status==='fulfilled'&&result.value?.status!=='needs_attention'?'complete':'needs_attention'}]));
-  const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);organizeReviewCategories(s);});await (app.store.stageTransaction||app.store.transaction)(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
- }catch{await (app.store.stageTransaction||app.store.transaction)(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:'needs_attention',message:'A scheduled source check failed; pending work is retained.'};});return {ok:false};}
- finally{await app.store.transaction(s=>{if(s.scheduledLease?.id===lease)delete s.scheduledLease;});}
+  const ok=Object.values(sources).every(r=>r.status==='complete');await app.store.transaction(s=>{prepareScriptedDrafts(s);organizeReviewCategories(s);});await metadata(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:ok?'complete':'needs_attention',sources};});return {ok,sources};
+ }catch{await metadata(s=>{s.lastScheduledRun={at:new Date().toISOString(),status:'needs_attention',message:'A scheduled source check failed; pending work is retained.'};});return {ok:false};}
+ finally{await (app.store.schedulerTransaction||app.store.transaction)(s=>{if(s.scheduledLease?.id===lease)delete s.scheduledLease;});}
 }
 export default async function handler(req,res){
  if(req.method!=='GET'){res.writeHead(405);return res.end();}

@@ -1,5 +1,19 @@
+import {createHash} from 'node:crypto';
 import {redoFilename} from './drive-redo.mjs';
 import {importDriveProduction} from './drive-production.mjs';
+
+export function driveContentHash(batches){return createHash('sha256').update(JSON.stringify(batches.map(b=>({id:b.folder.id,title:b.folder.title||b.folder.name,parents:[...(b.folder.parent_ids||[])].sort(),created:b.folder.created_at||null,files:b.files.map(f=>({id:f.id,title:f.title||f.name,parents:[...(f.parent_ids||[])].sort(),updated:f.updated_at||null})).sort((a,b)=>a.id.localeCompare(b.id))})).sort((a,b)=>a.id.localeCompare(b.id)))).digest('hex');}
+async function persistInventory(store,{rootId,batches,full=false,expectedHash}){
+ const checkedAt=new Date().toISOString(),contentHash=driveContentHash(batches);
+ const result=await store.transaction(s=>{
+  if(expectedHash!==undefined&&s.snapshot.driveProduction?.inventoryHash!==expectedHash)throw Error('Drive inventory changed during intake check; retry next sync');
+  if(s.snapshot.driveProduction?.rootId===rootId&&s.snapshot.driveProduction?.contentHash===contentHash)return {unchanged:true,runs:batches.length,files:batches.reduce((n,b)=>n+b.files.length,0)};
+  const result=importDriveProduction(s,{rootId,checkedAt,batches});s.snapshot.driveProduction.contentHash=contentHash;return result;
+ });
+ // Check freshness is operational metadata, not a reason to rewrite every rug.
+ const save=store.schedulerTransaction||store.transaction;await save(s=>{if(full)s.driveFullInventoryAt=checkedAt;else s.driveIntakeCheckAt=checkedAt;});return result;
+}
+
 const ROOT='1m2aiQXNJ9a_n3Mr12VU4W2OCZSYiLAeR';
 export class GoogleDriveProduction{
  constructor({clientId,clientSecret,refreshToken,fetchImpl=fetch,rootId=ROOT,writeEnabled=false}){Object.assign(this,{clientId,clientSecret,refreshToken,fetch:fetchImpl,rootId,writeEnabled});this.previews=new Map();}
@@ -9,7 +23,7 @@ export class GoogleDriveProduction{
  async children(parent,filter){if(!/^[a-zA-Z0-9_-]+$/.test(parent))throw Error('Invalid Drive parent');const files=[];let pageToken;do{const page=await this.get('files',{q:`'${parent}' in parents and trashed = false and (${filter})`,pageSize:1000,fields:'nextPageToken,incompleteSearch,files(id,name,mimeType,parents,size,createdTime,modifiedTime)',supportsAllDrives:true,includeItemsFromAllDrives:true,...(pageToken?{pageToken}:{})});if(page.incompleteSearch||!Array.isArray(page.files))throw Error('Drive folder inventory incomplete');files.push(...page.files);pageToken=page.nextPageToken;}while(pageToken);return files;}
  async sync(store){const folders=(await this.children(this.rootId,"mimeType = 'application/vnd.google-apps.folder'")).filter(f=>/^pro\s*[_-]?\s*\d+$/i.test(f.name)),batches=[];
   for(const folder of folders){const files=await this.children(folder.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");batches.push({complete:true,folder:{id:folder.id,title:folder.name,parent_ids:folder.parents,created_at:folder.createdTime,url:'https://drive.google.com/drive/folders/'+folder.id},files:files.map(f=>({id:f.id,title:f.name,mime_type:f.mimeType,parent_ids:f.parents,size:f.size,created_at:f.createdTime,updated_at:f.modifiedTime}))});}
-  return store.transaction(s=>{const checkedAt=new Date().toISOString();s.driveFullInventoryAt=checkedAt;return importDriveProduction(s,{rootId:this.rootId,checkedAt,batches});});
+  return persistInventory(store,{rootId:this.rootId,batches,full:true});
  }
  async syncIntake(store,runId=null){
   const current=await store.read(),runs=current.snapshot.productionRuns?.runs||[],target=runs.find(r=>r.id===(runId||current.settings.upcomingProductionRunId));
@@ -17,7 +31,7 @@ export class GoogleDriveProduction{
   const folder=await this.get('files/'+target.id,{fields:'id,parents,trashed',supportsAllDrives:true});if(folder.trashed||!folder.parents?.includes(this.rootId))throw Error('Upcoming production folder is outside verified intake');
   const files=await this.children(target.id,"mimeType contains 'image/' or mimeType = 'application/pdf'");
   const batches=runs.map(run=>({complete:true,folder:{id:run.id,title:run.name,parent_ids:[this.rootId],created_at:run.folderCreatedAt,url:run.folderUrl},files:run.id===target.id?files.map(f=>({id:f.id,title:f.name,parent_ids:f.parents,updated_at:f.modifiedTime})):run.orders.flatMap(o=>o.rugs).concat(run.unmatchedFiles||[]).map(f=>({id:f.sourceFileId||f.id,title:f.fileName,parent_ids:[run.id],updated_at:f.sourceModifiedAt}))}));
-  return store.transaction(s=>{if(s.snapshot.driveProduction?.inventoryHash!==current.snapshot.driveProduction.inventoryHash)throw Error('Drive inventory changed during intake check; retry next sync');s.driveFullInventoryAt||=current.snapshot.driveProduction.checkedAt;return importDriveProduction(s,{rootId:this.rootId,checkedAt:new Date().toISOString(),batches});});
+  return persistInventory(store,{rootId:this.rootId,batches,expectedHash:current.snapshot.driveProduction.inventoryHash});
  }
  async returnRedoFile({fileId,folderId}){
   if(!this.writeEnabled)throw Error('Drive write authorization is required');
