@@ -35,7 +35,7 @@ const here=path.dirname(fileURLToPath(import.meta.url));
 export async function createServer({store,provider,origin='http://127.0.0.1:43841',allowedOrigins=[origin],stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,gmailSync=null,parselProbe=null,livePrescan=null,productionClient=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null,shopifyWebhookSetup=null}={}){
  store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=demo?new MockCarrier():new DisabledCarrier();const events=new Set();
  const files=['goat-output-model.js','control-center.js','app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
- files.push('review-routing.js','address-issues-ui.js','gideon-chat.js','prescan-panel.js','startup-guard.js','gideon-gold.svg','login.js');
+ files.push('live-state.js','review-routing.js','address-issues-ui.js','gideon-chat.js','prescan-panel.js','startup-guard.js','gideon-gold.svg','login.js');
  const clientVersion=createHash('sha256').update((await Promise.all(files.map(n=>fs.readFile(path.join(here,'public',n))))).join('')).digest('hex').slice(0,16);
  const hosts=new Map(allowedOrigins.map(o=>[new URL(o).host,o]));
  function publish(){for(const res of events)res.write('data: changed\n\n');}

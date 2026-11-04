@@ -1,3 +1,4 @@
+import {publishLiveState} from './live-state.js';
 import {ORDER_STAGES,normalizeStage,stageLabel} from './order-stages.js';
 import {classifyReviewConversation} from './review-routing.js';
 import {needsNextProduction} from './expedited-urgency.js';
@@ -232,7 +233,7 @@ async function refreshOnce(force=false){
  const request=++refreshRequest;
  let next;
  try{const packet=await api('/api/live'+(liveRevision?'?since='+encodeURIComponent(liveRevision):''));liveRevision=packet.revision;if(packet.unchanged){renderLiveRuntime();if(force)requestRender();return}next=mergeLive(state,packet)}catch(e){liveRevision=null;if(request<appliedRefresh)return;$('#connection-label').textContent='Server disconnected';$('#connection-dot').classList.add('offline');if(state)state.connection.ready=false;renderLiveRuntime();for(const b of $$('.run-button'))b.disabled=true;updateReviewControls();updateDecisionButtons();updateAnswerBatch();if(force)toast('The local server is offline. Check your connection and sign in again if your session expired.');return}
- if(request<appliedRefresh)return;appliedRefresh=request;csrf=next.token;clearChangedSelections(next);state=next;document.dispatchEvent(new CustomEvent('shuttle:state',{detail:next}));
+ if(request<appliedRefresh)return;appliedRefresh=request;csrf=next.token;clearChangedSelections(next);state=next;publishLiveState(next);document.dispatchEvent(new CustomEvent('shuttle:state',{detail:next}));
  if(next.clientVersion&&loadedClientVersion!==next.clientVersion)offerClientUpdate(next.clientVersion);
  try{
   renderLiveRuntime();renderReconciliationStatus();renderApprovalQueue();renderLatestSubmission();updateReviewControls();updateDecisionButtons();updateAnswerBatch();
