@@ -5,8 +5,9 @@ const snapshots=['pipeline','unfulfilled','expedited','productionRuns'];
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 export function stageStore(pool,table){
  if(!/^(?:[a-z][a-z0-9_]*\.)?shuttle_state$/.test(table))throw Error('Invalid workflow table');
- const projection=`jsonb_build_object(${keys.map(k=>`'${k}',payload->'${k}'`).join(',')},'snapshot',jsonb_build_object(${snapshots.map(k=>`'${k}',payload#>'{snapshot,${k}}'`).join(',')}),'events','[]'::jsonb)`;
- const load=async(client,lock=false)=>{const row=(await client.query('SELECT '+projection+' AS payload FROM '+table+' WHERE id=1'+(lock?' FOR UPDATE':''))).rows[0];if(!row)throw Error('Workflow stage record missing');return row.payload;};
+ // jsonb_each detoasts the large workflow object once; repeated payload->key
+ // expressions can repeatedly decompress the whole mailbox for one small read.
+ const load=async(client,lock=false)=>{const sql="WITH source AS MATERIALIZED (SELECT payload FROM "+table+" WHERE id=1"+(lock?" FOR UPDATE":"")+") SELECT COALESCE(jsonb_object_agg(field.key,CASE WHEN field.key='snapshot' THEN COALESCE((SELECT jsonb_object_agg(item.key,item.value) FROM jsonb_each(field.value) item WHERE item.key=ANY($2::text[])),'{}'::jsonb) ELSE field.value END),'{}'::jsonb)||jsonb_build_object('events','[]'::jsonb) AS payload FROM source CROSS JOIN LATERAL jsonb_each(source.payload) field WHERE field.key=ANY($1::text[])";const row=(await client.query({text:sql,values:[[...keys,'snapshot'],snapshots],query_timeout:45000})).rows[0];if(!row?.payload?.snapshot)throw Error('Workflow stage record missing');return row.payload;};
  async function transaction(fn){const c=await pool.connect();let discarded=false,phase='stage row read';try{
   await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='3s'");await c.query("SET LOCAL statement_timeout='40s'");
   const before=await load(c,true),s=structuredClone(before),result=await fn(s),patches=[];
