@@ -29,10 +29,12 @@ export function validateStageRequest(r,now=Date.now()){
  if(['ready for pickup','picked up'].includes(stage)&&(!e.pickupVerified||!e.readinessVerified||(stage==='picked up'&&!e.collectionVerified)))throw Error('Verified pickup readiness/collection required');
  return {...r,stage,order:String(r.order)};
 }
+function recordProductionFact(s,r){const {order,stage}=r; if(OWNERS['SHUTTLE 2.0'].includes(stage)&&productionStart(r.productionDate)!==null){s.productionFacts||=[];let fact=s.productionFacts.find(f=>String(f.order)===order);if(!fact){fact={order};s.productionFacts.push(fact);}Object.assign(fact,{approvalVerified:true,artworkVerified:true,productionDate:r.productionDate,runId:r.runId||r.runIds?.[0]||'confirmed-production-'+r.productionDate,runIds:r.runIds||[r.runId||'confirmed-production-'+r.productionDate],evidenceRequestId:r.requestId});}
+}
 export function applyStageRequest(s,r,user,now=Date.now()){
  requireRole(user,['owner']);r=validateStageRequest(r,now);const {order,stage}=r;
  s.stageEvidenceReceipts||={};const fingerprint=createHash('sha256').update(JSON.stringify(r)).digest('hex'),old=s.stageEvidenceReceipts[r.requestId];
- if(old){if(old.fingerprint!==fingerprint)throw Error('Request identity reused with different evidence');return {...old,duplicate:true};}
+ if(old){if(old.fingerprint!==fingerprint)throw Error('Request identity reused with different evidence');if(s.orderStages?.[order]?.stage===stage)recordProductionFact(s,r);return {...old,duplicate:true};}
  const binding=s.shopifyOrderBindings?.[order];if(!binding?.verified||binding.id!==r.shopifyOrderId)throw Error('Current Shopify identity differs from specialist evidence');
  const commerce=s.shopifyOrders?.[order];if(commerce?.cancelledAt)throw Error('Cancelled order requires reconciliation');
  const prior=s.orderStages?.[order];
@@ -46,8 +48,7 @@ export function applyStageRequest(s,r,user,now=Date.now()){
  if(!shipping&&['FULFILLED','PARTIALLY_FULFILLED'].includes(commerce?.displayFulfillmentStatus)&&!['ready for pickup','picked up'].includes(stage))throw Error('Existing fulfillment needs shipping/redo reconciliation before a proof/production stage');
  const at=new Date(now).toISOString(),changed=automatedStage(s,order,stage,'specialist:'+r.sourceChat,at);
  if(changed){s.orderStages[order].evidenceRequestId=r.requestId;s.orderStages[order].updatedBy='specialist:'+r.sourceChat;}
- // Production dates advance only from this verified approval+file evidence, never from a tag.
- if(stage==='awaiting production'&&productionStart(r.productionDate)!==null){s.productionFacts||=[];let fact=s.productionFacts.find(f=>String(f.order)===order);if(!fact){fact={order};s.productionFacts.push(fact);}Object.assign(fact,{approvalVerified:true,artworkVerified:true,productionDate:r.productionDate,runId:r.runId||'confirmed-production-'+r.productionDate,evidenceRequestId:r.requestId});}
+ recordProductionFact(s,r);
  s.settings||={};s.settings.shopifyTagSyncEnabled=true;s.shopifyStatusSync||={};if(changed||s.shopifyStatusSync[order]?.status!=='synced')s.shopifyStatusSync[order]={...s.shopifyStatusSync[order],status:'pending'};
  const receipt={requestId:r.requestId,order,stage,sourceChat:r.sourceChat,fingerprint,status:changed?'applied':'unchanged',appliedAt:at,submittedBy:user.id,evidence:r.evidence};s.stageEvidenceReceipts[r.requestId]=receipt;return receipt;
 }
