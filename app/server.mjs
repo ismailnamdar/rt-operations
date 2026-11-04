@@ -1,3 +1,4 @@
+import {requestReviewAI} from './review-ai.mjs';
 import {ingestSpecialistStages} from './specialist-stages.mjs';
 import {projectOrderStages,syncVerifiedStatusTags} from './shopify-status.mjs';
 import {organizeReviewCategories} from './review-routing.mjs';
@@ -99,6 +100,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    else if(url.pathname==='/api/team/disable')result=await disableUser(store,user,b.id);
    else if(url.pathname==='/api/control-center/acknowledge')result=await store.transaction(s=>acknowledgeControl(s,user,b));
    else if(url.pathname==='/api/integrations/check')result=await checkIntegrations({store,user,gmail,drive,provider,parselProbe,emailSendingEnabled});
+   else if(url.pathname==='/api/review/ai'){requireRole(user,['owner']);result=await store.transaction(s=>requestReviewAI(s,user,b));}
    else if(url.pathname==='/api/gideon/message'){requireRole(user,['owner']);result=await store.transaction(s=>askGideon(s,user,b));}
    else if(url.pathname==='/api/production/proceed'){requireRole(user,['owner']);if(!livePrescan)fail('Parsel and Shopify must be connected',503);result=await store.transaction(s=>respondPrescan(s,user,{...b,action:'proceed',scopeVerified:true}));}
    else if(url.pathname==='/api/production/refresh'){requireRole(user,['owner','warehouse']);if(drive)await drive.syncIntake(store,b.runId);const queued=await store.transaction(s=>queueProductionRefresh(s,user,b.runId));await processProductionRefresh({store,client:productionClient,limit:200,deadline:Date.now()+18000});result={...queued,refresh:(await store.read()).productionRefresh[b.runId]};}
