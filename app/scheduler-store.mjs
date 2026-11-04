@@ -1,6 +1,6 @@
 // Small private operational records. Never copy mailbox/order payloads here.
 const publicView=s=>JSON.stringify(Object.fromEntries(['lastScheduledRun','lastLivePrescan'].filter(k=>s[k]).map(k=>[k,Object.fromEntries(Object.entries(s[k]).filter(([field])=>field!=='at'))])));
-const allowed=new Set(['scheduledLease','lastScheduledRun','lastLivePrescan','driveFullInventoryAt','driveIntakeCheckAt']);
+const allowed=new Set(['scheduledLease','lastScheduledRun','lastLivePrescan','driveFullInventoryAt','driveIntakeCheckAt','storageUpgradeUntil','storageUpgradeReadyAt']);
 export async function schedulerStore(pool,table){
  if(!/^(?:[a-z][a-z0-9_]*\.)?shuttle_state$/.test(table))throw Error('Invalid workflow table');
  const side=table+'_scheduler';let existing;

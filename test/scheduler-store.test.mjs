@@ -17,3 +17,5 @@ test('integration health uses the small projection instead of loading mailbox bo
  const report=await checkIntegrations({store:{read:async()=>{throw Error('Full mailbox read prohibited');},integrationRead:async()=>{read++;return {gmailSync:{pending:{a:{error:'retry',providerStatus:429}}},driveFullInventoryAt:'2026-11-04T20:00:00Z'};}},user:{role:'owner'}});
  assert.equal(read,1);assert.equal(report.checks.gmail.pending,1);assert.equal(report.checks.drive.lastSuccessAt,'2026-11-04T20:00:00Z');assert.equal(report.writesPerformed,false);
 });
+
+test('scheduled processing respects the bounded storage maintenance window',async()=>{const {runScheduled}=await import('../api/cron.mjs');const s={storageUpgradeUntil:Date.now()+60000};let runs=0;const app={store:{schedulerTransaction:async fn=>fn(s),read:async()=>{runs++;throw Error('should not start');}}};assert.deepEqual(await runScheduled(app),{busy:true});assert.equal(runs,0);});

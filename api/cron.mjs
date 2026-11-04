@@ -12,7 +12,7 @@ import {syncVerifiedStatusTags} from '../app/shopify-status.mjs';
 import {randomUUID} from 'node:crypto';
 export async function runScheduled(app){
  const metadata=app.store.schedulerTransaction||app.store.stageTransaction||app.store.transaction;
- const lease=randomUUID();const claimed=await (app.store.schedulerTransaction||app.store.transaction)(s=>{if(s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
+ const lease=randomUUID();const claimed=await (app.store.schedulerTransaction||app.store.transaction)(s=>{if(s.storageUpgradeUntil>Date.now()||s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
  try{
   const current=await app.store.read(),tasks=[];
   tasks.push(['stages',async()=>{if(current.productionFacts?.length)await (app.store.stageTransaction||app.store.transaction)(s=>{advanceProductionStages(s);});}]);
