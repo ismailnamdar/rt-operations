@@ -12,9 +12,12 @@ export function stageStore(pool,table){
   const before=await load(c,true),s=structuredClone(before),result=await fn(s),patches=[];
   for(const k of keys)if(!['version','revision'].includes(k)&&!same(before[k],s[k]))patches.push({path:[k],value:s[k]??null});
   for(const k of snapshots)if(!same(before.snapshot[k],s.snapshot?.[k]))patches.push({path:['snapshot',k],value:s.snapshot?.[k]??null});
-  if(patches.length||s.events.length){let expression='payload';const args=[];for(const patch of patches){args.push(patch.path,JSON.stringify(patch.value));expression=`jsonb_set(${expression},$${args.length-1}::text[],$${args.length}::jsonb,true)`;}
-   if(s.events.length){args.push(JSON.stringify(s.events));expression=`jsonb_set(${expression},'{events}',COALESCE(payload->'events','[]'::jsonb)||$${args.length}::jsonb,true)`;}
-   expression=`jsonb_set(${expression},'{revision}',to_jsonb(COALESCE((payload->>'revision')::bigint,0)+1),true)`;await c.query('UPDATE '+table+' SET payload='+expression+' WHERE id=1',args);
+  if(patches.length||s.events.length){
+   const root={},snapshot={};for(const patch of patches){if(patch.path.length===1)root[patch.path[0]]=patch.value;else snapshot[patch.path[1]]=patch.value;}
+   // Compose a small patch first, then merge the large root exactly once. Nested
+   // jsonb_set calls repeatedly copy the entire mailbox blob under the row lock.
+   const patch="$1::jsonb || jsonb_build_object('revision',COALESCE((payload->>'revision')::bigint,0)+1)"+" || CASE WHEN $2::jsonb='{}'::jsonb THEN '{}'::jsonb ELSE jsonb_build_object('snapshot',COALESCE(payload->'snapshot','{}'::jsonb)||$2::jsonb) END || CASE WHEN $3::jsonb='[]'::jsonb THEN '{}'::jsonb ELSE jsonb_build_object('events',COALESCE(payload->'events','[]'::jsonb)||$3::jsonb) END";
+   await c.query('UPDATE '+table+' SET payload=payload||('+patch+') WHERE id=1',[JSON.stringify(root),JSON.stringify(snapshot),JSON.stringify(s.events)]);
   }
   await c.query('COMMIT');return structuredClone(result);
  }catch(e){try{await c.query('ROLLBACK');}catch{discarded=true;c.release(true);}throw e;}finally{if(!discarded)c.release();}}
