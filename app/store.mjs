@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {createAuthSidecar} from './auth-store.mjs';
 import {partitionedStore} from './partitioned-store.mjs';
 export const blank = () => ({version:1,revision:0,users:[],sessions:[],intents:[],printJobs:[],jobs:[],events:[],settings:{upcomingProductionRunId:'1nOvYd0k_GgVfUcRVckBpMG1NvHVTiqgC',autoPrintUPS:true,autoPrintFedEx:true},snapshot:{results:{review:[],questions:[],gallery:[],history:[],alerts:[],updatedAt:new Date().toISOString(),sourceLabel:'Hosted migration — no live accounts connected'},runs:[],pipeline:{orders:[]},unfulfilled:{orders:[],inventoryComplete:false},schedule:{days:[],version:'initial'},expedited:{orders:[]},mockupBatches:{batches:[]},emailTemplates:[],lukasTodos:[]}});
 export async function initializeWorkflowTable(pool,schema){
@@ -21,7 +22,8 @@ export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/sta
     const {Pool}=await import('pg');const pool=new Pool({connectionString,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:5000,query_timeout:10000});
     let table;try{table=await initializeWorkflowTable(pool,schema);}catch(error){await pool.end().catch(()=>{});throw error;}
     if(partitioned)try{return await partitionedStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
-    return {authRead:async()=>(await pool.query("SELECT jsonb_build_object('users',payload->'users','sessions',payload->'sessions') AS payload FROM "+table+' WHERE id=1')).rows[0].payload,revision:async()=>String((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
+    let auth;try{auth=await createAuthSidecar(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
+    return {...auth,revision:async()=>String((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
       transaction:fn=>workflowTransaction(pool,table,fn),close:()=>pool.end()};
   }
   let tail=Promise.resolve();
