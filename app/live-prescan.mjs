@@ -65,7 +65,18 @@ export class LivePrescan{
   }
   state=await this.store.read();const h=state.parselHistory,pending=[...new Set(Object.values(h.labels).map(l=>l.shipmentId))].filter(id=>!h.shipments[id]).slice(0,limit);
   // Small concurrent groups avoid one HTTP call per label on every later prescan.
-  const stopAt=this.now()+20000;for(let at=0;at<pending.length&&this.now()<stopAt-8000;at+=4)await Promise.all(pending.slice(at,at+4).map(async id=>{const ship=(await this.api('/shipments/'+encodeURIComponent(id))).data;if(ship?.id!==id)throw Error('Shipment identity mismatch');await this.store.transaction(s=>{s.parselHistory.shipments[id]={id,order:orderRef(ship.custom_reference_1),destination:ship.destination,parcel:ship.parcel,labelId:ship.shipping_label?.id,origin:ship.origin,returnAddress:ship.return_address};if(!s.prescanSender&&completeAddress(ship.origin)&&/^\+?1?949/.test(String(ship.origin.phone||'').replace(/\D/g,'')))s.prescanSender=suppliedAddress(ship.origin);});}));
+  const stopAt=this.now()+20000;
+  for(let at=0;at<pending.length&&this.now()<stopAt-8000;at+=4){
+   const results=await Promise.allSettled(pending.slice(at,at+4).map(async id=>{
+    const ship=(await this.api('/shipments/'+encodeURIComponent(id))).data;
+    if(ship?.id!==id)throw Error('Shipment identity mismatch');
+    return {id,order:orderRef(ship.custom_reference_1),destination:ship.destination,parcel:ship.parcel,labelId:ship.shipping_label?.id,origin:ship.origin,returnAddress:ship.return_address};
+   }));
+   const verified=results.filter(r=>r.status==='fulfilled').map(r=>r.value);
+   // Persist verified reads together; a failed sibling remains pending, not lost.
+   if(verified.length)await this.store.transaction(s=>{for(const ship of verified){s.parselHistory.shipments[ship.id]=ship;if(!s.prescanSender&&completeAddress(ship.origin)&&/^\+?1?949/.test(String(ship.origin.phone||'').replace(/\D/g,'')))s.prescanSender=suppliedAddress(ship.origin);}});
+   const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;
+  }
   await this.store.transaction(s=>{const h=s.parselHistory;h.complete=h.listingComplete&&Object.values(h.labels).every(l=>h.shipments[l.shipmentId]);advanceCarrierStages(s,this.now());});
  }
  async commerce(order){const s=await this.store.read(),id=s.shopifyOrderBindings?.[order]?.id;if(!id||s.shopifyConnection?.revoked)throw Error('Current Shopify order binding is unavailable');const value=(await this.client.request(PRESCAN_ORDER_QUERY,{id}))?.order;if(value?.id!==id||String(value.name).replace(/^#/,'')!==order)throw Error('Shopify order identity does not match');if(!value.shippingLines||value.shippingLines.pageInfo.hasNextPage||!Array.isArray(value.fulfillments)||value.fulfillments.length>=100)throw Error('Shopify shipping/fulfillment coverage is incomplete');return value;}

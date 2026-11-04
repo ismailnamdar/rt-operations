@@ -16,3 +16,16 @@ test('database lock waits are bounded and failed transactions roll back without 
  await assert.rejects(workflowTransaction({connect:async()=>client},'shuttle_hosted.shuttle_state',()=>{ran=true;}),/Lock timeout/);
  assert.equal(ran,false);assert.equal(released,1);assert.ok(calls.includes("SET LOCAL lock_timeout='3s'"));assert.ok(calls.includes("SET LOCAL statement_timeout='8s'"));assert.equal(calls.at(-1),'ROLLBACK');assert.ok(!calls.some(q=>q.startsWith('UPDATE')));
 });
+
+ test('unchanged workflow transactions commit without rewriting payload or revision',async()=>{
+ const {workflowTransaction}=await import('../app/store.mjs');const calls=[],state={revision:9,settings:{enabled:true}};let released=0;
+ const client={query:async sql=>{calls.push(sql);return {rows:[{payload:state}]};},release:()=>released++};
+ assert.equal(await workflowTransaction({connect:async()=>client},'shuttle_hosted.shuttle_state',s=>s.settings.enabled),true);
+ assert.equal(state.revision,9);assert.equal(calls.at(-1),'COMMIT');assert.equal(released,1);assert.ok(!calls.some(q=>q.startsWith('UPDATE')));
+ });
+ test('changed workflow transactions retain exactly one durable write',async()=>{
+ const {workflowTransaction}=await import('../app/store.mjs');const calls=[],state={revision:9,settings:{enabled:true}};
+ const client={query:async sql=>{calls.push(sql);return {rows:[{payload:state}]};},release:()=>{}};
+ await workflowTransaction({connect:async()=>client},'shuttle_hosted.shuttle_state',s=>{s.settings.enabled=false;});
+ assert.equal(state.revision,10);assert.equal(calls.filter(q=>q.startsWith('UPDATE')).length,1);assert.equal(calls.at(-1),'COMMIT');
+ });

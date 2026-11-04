@@ -37,3 +37,13 @@ test('numbered Parsel history pages are exhausted before duplicate coverage is c
  f.engine.carrier.fetchImpl=async(url,options)=>{const u=new URL(url);if(u.pathname!=='/shipping_labels')return original(url,options);const page=Number(u.searchParams.get('page'));pages.push(page);return Response.json({data:[],metadata:{current_page:page,total_pages:2,page_size:100,total_count:0}});};
  const live=f.engine;await live.syncHistory();assert.equal(f.s.parselHistory.complete,false);await live.syncHistory();assert.equal(f.s.parselHistory.complete,true);assert.deepEqual(pages,[1,2]);
 });
+
+ test('history hydration batches verified shipment reads and preserves successes on sibling failure',async()=>{
+ for(const failure of [false,true]){
+ const f=fixture();f.s.parselHistory={labels:Object.fromEntries([1,2,3,4].map(n=>['l'+n,{shipmentId:'s'+n}])),shipments:{},listingComplete:true,checkedAt:new Date().toISOString()};let writes=0;
+ f.engine.store.transaction=async fn=>{writes++;return fn(f.s);};
+ f.engine.api=async route=>{const id=route.split('/').at(-1);if(failure&&id==='s3')throw Error('Transient provider failure');return {data:{id,custom_reference_1:'17001',origin:address}};};
+ if(failure){await assert.rejects(f.engine.syncHistory(),/Transient provider/);assert.equal(Object.keys(f.s.parselHistory.shipments).length,3);assert.equal(f.s.parselHistory.shipments.s3,undefined);assert.equal(writes,1);}
+ else{await f.engine.syncHistory();assert.equal(Object.keys(f.s.parselHistory.shipments).length,4);assert.equal(writes,2);assert.equal(f.s.parselHistory.complete,true);}
+ }
+ });
