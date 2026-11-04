@@ -37,9 +37,9 @@ export function applyStageRequest(s,r,user,now=Date.now()){
  if(old){if(old.fingerprint!==fingerprint)throw Error('Request identity reused with different evidence');if(s.orderStages?.[order]?.stage===stage&&!(s.productionFacts||[]).some(f=>String(f.order)===order))recordProductionFact(s,r);return {...old,duplicate:true};}
  const binding=s.shopifyOrderBindings?.[order];if(!binding?.verified||binding.id!==r.shopifyOrderId)throw Error('Current Shopify identity differs from specialist evidence');
  const commerce=s.shopifyOrders?.[order];if(commerce?.cancelledAt)throw Error('Cancelled order requires reconciliation');
- const prior=s.orderStages?.[order];if(stage==='cutting / stitching / packing'&&!['in production','cutting / stitching / packing'].includes(prior?.stage))throw Error('Verified In production readback is required before the finishing transition');
+ const prior=s.orderStages?.[order],linkedPrerequisite=stage==='cutting / stitching / packing'&&prior?.stage==='in production'&&prior.source==='specialist:SHUTTLE 2.0'&&s.stageEvidenceReceipts?.[prior.evidenceRequestId]?.evidence?.prerequisiteFor===r.requestId;if(stage==='cutting / stitching / packing'&&!['in production','cutting / stitching / packing'].includes(prior?.stage))throw Error('Verified In production readback is required before the finishing transition');
  if(prior?.stage!==stage){
-  if(prior?.updatedAt&&Date.parse(prior.updatedAt)>Date.parse(r.observedAt))throw Error('Newer canonical stage/correction must be reconciled first');
+  if(!linkedPrerequisite&&prior?.updatedAt&&Date.parse(prior.updatedAt)>Date.parse(r.observedAt))throw Error('Newer canonical stage/correction must be reconciled first');
   if(prior?.stage&&RANK[normalizeStage(prior.stage)]>RANK[stage])throw Error('Earlier stage would regress verified progress; reconcile the revision/redo explicitly');
   if(['ready for pickup','picked up'].includes(prior?.stage)&&!['ready for pickup','picked up'].includes(stage))throw Error('Pickup workflow must not be replaced by a shipping/production inference');
  }

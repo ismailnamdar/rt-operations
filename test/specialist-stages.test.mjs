@@ -23,3 +23,7 @@ test('batch import uses one canonical transaction, isolates invalid rows and rec
 test('finishing requires a persisted production prerequisite even after the time gate',()=>{
  const late=Date.parse('2026-11-04T18:00:00Z'),r={...request(),requestId:'finishing-123',observedAt:new Date(late-60000).toISOString(),stage:'cutting / stitching / packing',productionDate:'2026-11-03',runIds:['pro-one']},s=state();assert.throws(()=>applyStageRequest(s,r,owner,late),/In production readback/);s.orderStages={123:{stage:'in production',updatedAt:new Date(late-120000).toISOString()}};applyStageRequest(s,r,owner,late);assert.equal(s.orderStages['123'].stage,'cutting / stitching / packing');
 });
+
+test('a verified linked production prerequisite can advance from the same observed evidence',()=>{
+ const late=Date.parse('2026-11-04T18:00:00Z'),s=state(),finish={...request(),requestId:'finishing-linked-123',observedAt:new Date(late-60000).toISOString(),stage:'cutting / stitching / packing',productionDate:'2026-11-03',runIds:['pro-one']},prior={...finish,requestId:'finishing-linked-123-prerequisite',stage:'in production',evidence:{...finish.evidence,prerequisiteFor:finish.requestId}};applyStageRequest(s,prior,owner,late);applyStageRequest(s,finish,owner,late+1000);assert.equal(s.orderStages['123'].stage,'cutting / stitching / packing');
+});
