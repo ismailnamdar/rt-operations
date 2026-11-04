@@ -55,6 +55,10 @@ export async function syncVerifiedStatusTags({store,client,limit=20,orders=null,
  await syncShopifyStatuses({store,client,limit,orders,deadline:Date.now()+25000});return {status:'processed'};
 }
 export function projectOrderStages(s){
- for(const key of ['pipeline','unfulfilled','expedited'])for(const row of s.snapshot[key]?.orders||[]){const stage=normalizeStage(s.orderStages?.[String(row.order)]?.stage);if(ORDER_STAGES.includes(stage))row.productionStage=stage;}
+ const carriers=new Map(Object.values(s.stageEvidenceReceipts||{}).filter(r=>r.sourceChat==='Label Booker').flatMap(r=>(r.evidence?.packages||[]).map(p=>[p.tracking,p.carrier])));
+ for(const key of ['pipeline','unfulfilled','expedited'])for(const row of s.snapshot[key]?.orders||[]){const stage=normalizeStage(s.orderStages?.[String(row.order)]?.stage);if(ORDER_STAGES.includes(stage))row.productionStage=stage;
+  const carrier=s.carrierStageEvidence?.[String(row.order)];if(carrier?.packages?.length){row.shipments=carrier.packages.map(p=>({trackingNumber:p.tracking,carrier:p.carrier||carriers.get(p.tracking)||'Carrier',status:({PRE_TRANSIT:'label_created',CREATED:'label_created',LABEL_CREATED:'label_created',IN_TRANSIT:'in_transit',OUT_FOR_DELIVERY:'out_for_delivery',DELIVERED:'delivered'})[p.status]||p.status,source:'Parsel verified package readback',checkedAt:p.checkedAt||carrier.checkedAt}));}
+ }
+ if(s.snapshot.unfulfilled){const known=new Map((s.snapshot.unfulfilled.orders||[]).filter(r=>r.shipments?.length&&['awaiting carrier','in transit','delivered'].includes(normalizeStage(s.orderStages?.[String(r.order)]?.stage))).map(r=>[String(r.order),r]));s.snapshot.unfulfilled.awaitingDelivery=[...(s.snapshot.unfulfilled.awaitingDelivery||[]).filter(r=>!known.has(String(r.order))),...[...known.values()].filter(r=>normalizeStage(s.orderStages[String(r.order)].stage)!=='delivered')];s.snapshot.unfulfilled.awaitingDeliveryComplete=false;s.snapshot.unfulfilled.awaitingDeliveryCoverage='Exact current package readbacks for matched orders; older or unmatched carrier records remain unverified.';}
  return s;
 }
