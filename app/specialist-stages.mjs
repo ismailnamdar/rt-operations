@@ -23,7 +23,7 @@ export function validateStageRequest(r,now=Date.now()){
  if(OWNERS['SHUTTLE 2.0'].includes(stage)){
   if(!e.approvalSourceMessageId||!e.threadId||!Array.isArray(e.completeProductionFiles)||!e.completeProductionFiles.length||e.completeProductionFiles.some(f=>!f.driveFileId||!f.filename||!timestamp(f.verifiedAt,now)))throw Error('Whole-order approval and complete verified production files required');
   if(stage!=='awaiting production'){
-   const start=productionStart(r.productionDate);if(!r.runId||start===null||now<start+(stage==='cutting / stitching / packing'?24*3600000:0))throw Error('Verified run and production clock do not support this stage');
+   const start=productionStart(r.productionDate);if((!r.runId&&(!Array.isArray(r.runIds)||!r.runIds.length||r.runIds.some(id=>typeof id!=='string'||!id)))||start===null||now<start+(stage==='cutting / stitching / packing'?24*3600000:0))throw Error('Verified run and production clock do not support this stage');
   }
  }
  if(['ready for pickup','picked up'].includes(stage)&&(!e.pickupVerified||!e.readinessVerified||(stage==='picked up'&&!e.collectionVerified)))throw Error('Verified pickup readiness/collection required');
@@ -63,10 +63,10 @@ async function shippingEvidence(r,commerce,parsel,now){
  const actual=delivered?'delivered':accepted?'in transit':'awaiting carrier';if(actual!==r.stage)throw Error('Live carrier progress differs from proposed stage; refresh the audit');return labels;
 }
 export async function ingestSpecialistStages({store,client,parsel,user,requests,now=Date.now()}){
- requireRole(user,['owner']);if(!client)fail('Shopify is not connected',503);if(!Array.isArray(requests)||!requests.length||requests.length>5)fail('Submit one to five specialist requests at a time',400);
- const results=[];for(const value of requests){let r;try{r=validateStageRequest(value,now);const current=(await client.request(ORDER_QUERY,{id:r.shopifyOrderId}))?.order;if(current?.id!==r.shopifyOrderId||String(current.name).replace(/^#/,'')!==r.order)throw Error('Live Shopify order identity mismatch');let labels=null;
-  if(['awaiting carrier','in transit','delivered'].includes(r.stage)){const commerce=(await client.request(PRESCAN_ORDER_QUERY,{id:r.shopifyOrderId}))?.order;if(commerce?.id!==r.shopifyOrderId)throw Error('Current shipment order identity mismatch');labels=await shippingEvidence(r,commerce,parsel,now);}
-  const receipt=await store.transaction(s=>{mergeShopifyOrders(s,[current],{trackImport:false});const receipt=applyStageRequest(s,r,user,now);if(labels){s.carrierStageEvidence||={};s.carrierStageEvidence[r.order]={packages:labels,checkedAt:new Date(now).toISOString()};}return receipt;});results.push({requestId:r.requestId,order:r.order,stage:receipt.stage,status:receipt.status,duplicate:!!receipt.duplicate});
- }catch(error){results.push({requestId:value?.requestId,order:String(value?.order||''),status:'needs_attention',error:error.message});}}
+ requireRole(user,['owner']);if(!client)fail('Shopify is not connected',503);if(!Array.isArray(requests)||!requests.length||requests.length>20)fail('Submit one to twenty specialist requests at a time',400);
+ const prepared=[];for(let offset=0;offset<requests.length;offset+=4){prepared.push(...await Promise.all(requests.slice(offset,offset+4).map(async value=>{try{const r=validateStageRequest(value,now),current=(await client.request(ORDER_QUERY,{id:r.shopifyOrderId}))?.order;if(current?.id!==r.shopifyOrderId||String(current.name).replace(/^#/,'')!==r.order)throw Error('Live Shopify order identity mismatch');let labels=null;
+  if(['awaiting carrier','in transit','delivered'].includes(r.stage)){const commerce=(await client.request(PRESCAN_ORDER_QUERY,{id:r.shopifyOrderId}))?.order;if(commerce?.id!==r.shopifyOrderId)throw Error('Current shipment order identity mismatch');labels=await shippingEvidence(r,commerce,parsel,now);}return {r,current,labels};
+ }catch(error){return {error:{requestId:value?.requestId,order:String(value?.order||''),status:'needs_attention',error:error.message}};}})));}
+ const results=await store.transaction(s=>prepared.map(work=>{if(work.error)return work.error;const {r,current,labels}=work;try{mergeShopifyOrders(s,[current],{trackImport:false});const receipt=applyStageRequest(s,r,user,now);if(labels){s.carrierStageEvidence||={};s.carrierStageEvidence[r.order]={packages:labels,checkedAt:new Date(now).toISOString()};}return {requestId:r.requestId,order:r.order,stage:receipt.stage,status:receipt.status,duplicate:!!receipt.duplicate};}catch(error){return {requestId:r.requestId,order:r.order,status:'needs_attention',error:error.message};}}));
  const orders=results.filter(r=>r.status!=='needs_attention').map(r=>r.order);let tagSync=null;if(orders.length)tagSync=await syncVerifiedStatusTags({store,client,orders,limit:orders.length});const final=await store.read();for(const r of results)r.tagStatus=final.shopifyStatusSync?.[r.order]?.status||'not_updated';return {results,tagSync};
 }
