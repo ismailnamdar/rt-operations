@@ -22,17 +22,19 @@ export function validateDeployment(env){
  return origins;
 }
 export async function createVercelRuntime({env=process.env,store,client,authFetch=fetch}={}){
- const {canonical:origin,allowed:allowedOrigins}=validateDeployment(env);store||=await createStore({databaseUrl:env.DATABASE_URL,databaseCa:env.DATABASE_CA_CERT,schema:'shuttle_hosted'});
- client??=createShopifyConnection(env,{store,origin});
+ let phase='deployment';try{
+ const {canonical:origin,allowed:allowedOrigins}=validateDeployment(env);phase='database_init';store||=await createStore({databaseUrl:env.DATABASE_URL,databaseCa:env.DATABASE_CA_CERT,schema:'shuttle_hosted'});
+ phase='store_identity';client??=createShopifyConnection(env,{store,origin});
  if(env.SHOPIFY_STORE){const existing=(await (store.shopifyAuthRead?store.shopifyAuthRead():store.read())).shopifyConnection?.shop;if(existing&&existing!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');if(!existing)await store.transaction(s=>{if(s.shopifyConnection?.shop&&s.shopifyConnection.shop!==env.SHOPIFY_STORE)throw Error('Database belongs to another Shopify store');s.shopifyConnection={...s.shopifyConnection,shop:env.SHOPIFY_STORE};});}
  // Fail closed without live Parsel verification; never fall back to the mock buyer.
- const provider=shippingProvider(env);
+ phase='provider_init';const provider=shippingProvider(env);
  const livePrescan=env.PARSEL_TOKEN&&client?new LivePrescan({store,client,carrier:new ParselCarrier({token:env.PARSEL_TOKEN,baseUrl:env.PARSEL_BASE_URL||'https://api.parsel.app',liveBooking:false,labelHosts:(env.PARSEL_LABEL_HOSTS||'easypost-files.s3.us-west-2.amazonaws.com').split(',').map(h=>h.trim()).filter(Boolean)})}):null;
  const driveClient=new GoogleDriveProduction({clientId:env.GDRIVE_CLIENT_ID,clientSecret:env.GDRIVE_CLIENT_SECRET,refreshToken:env.GDRIVE_REFRESH_TOKEN,writeEnabled:env.GDRIVE_WRITE_ENABLED==='1'}),drive=driveClient.configured()?driveClient:null;
- const supabaseAuth=new SupabaseAuth({url:env.SUPABASE_URL,key:env.SUPABASE_PUBLISHABLE_KEY||env.SUPABASE_ANON_KEY,ownerEmail:env.SHUTTLE_OWNER_EMAIL,fetchImpl:authFetch});
+ phase='auth_init';const supabaseAuth=new SupabaseAuth({url:env.SUPABASE_URL,key:env.SUPABASE_PUBLISHABLE_KEY||env.SUPABASE_ANON_KEY,ownerEmail:env.SHUTTLE_OWNER_EMAIL,fetchImpl:authFetch});
  const shopifyOAuth=env.SHOPIFY_AUTH_MODE==='oauth'?new ShopifyOAuth({env,store,origin}):null;
  const gmailClient=new GmailClient({clientId:env.GMAIL_CLIENT_ID,clientSecret:env.GMAIL_CLIENT_SECRET,refreshToken:env.GMAIL_REFRESH_TOKEN,mailbox:'info@rugtomize.co'}),gmail=gmailClient.configured()?gmailClient:null;
- const {handler}=await createServer({productionClient:client,livePrescan,parselProbe:env.PARSEL_TOKEN?()=>new ParselCarrier({token:env.PARSEL_TOKEN,baseUrl:env.PARSEL_BASE_URL||'https://api.parsel.app',liveBooking:false}):null,shopifyWebhookSetup:client&&(env.SHOPIFY_WEBHOOK_SOURCE||'app')==='app'?user=>setupShopifyWebhooks({store,client,origin,user}):null,shopifyOAuth,supabaseAuth,store,provider,origin,allowedOrigins,drive,serverless:true,demo:false,shopify:env.SHOPIFY_TAG_SYNC==='1'?client:null,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?async()=>{await syncPaidShippingOrders({store,client,pages:1});return syncChangedOrders({store,client,pages:2});}:null,setupToken:env.SHUTTLE_SETUP_TOKEN||'',ownerEmail:env.SHUTTLE_OWNER_EMAIL||'',stationToken:env.SHUTTLE_STATION_TOKEN||'',workflowToken:env.SHUTTLE_WORKFLOW_TOKEN||'',gmail,gmailSync:gmail?()=>syncGmail({store,gmail,labelSync:env.GMAIL_LABEL_SYNC==='1'}):null,emailSendingEnabled:false});
+ phase='server_init';const {handler}=await createServer({productionClient:client,livePrescan,parselProbe:env.PARSEL_TOKEN?()=>new ParselCarrier({token:env.PARSEL_TOKEN,baseUrl:env.PARSEL_BASE_URL||'https://api.parsel.app',liveBooking:false}):null,shopifyWebhookSetup:client&&(env.SHOPIFY_WEBHOOK_SOURCE||'app')==='app'?user=>setupShopifyWebhooks({store,client,origin,user}):null,shopifyOAuth,supabaseAuth,store,provider,origin,allowedOrigins,drive,serverless:true,demo:false,shopify:env.SHOPIFY_TAG_SYNC==='1'?client:null,shopifyImport:client?()=>importLatestOrders({store,client,pages:1}):null,shopifyRefresh:client?async()=>{await syncPaidShippingOrders({store,client,pages:1});return syncChangedOrders({store,client,pages:2});}:null,setupToken:env.SHUTTLE_SETUP_TOKEN||'',ownerEmail:env.SHUTTLE_OWNER_EMAIL||'',stationToken:env.SHUTTLE_STATION_TOKEN||'',workflowToken:env.SHUTTLE_WORKFLOW_TOKEN||'',gmail,gmailSync:gmail?()=>syncGmail({store,gmail,labelSync:env.GMAIL_LABEL_SYNC==='1'}):null,emailSendingEnabled:false});
  return {handler,store,client,drive,gmail,origin,env,livePrescan};
+ }catch(error){error.runtimePhase=phase;throw error;}
 }
 export async function runtime(){if(!pending)pending=createVercelRuntime().catch(error=>{pending=null;throw error;});return pending;}
