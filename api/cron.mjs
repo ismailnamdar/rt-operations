@@ -11,6 +11,7 @@ import {syncPaidShippingOrders,importLatestOrders,processShopifyUpdates,syncChan
 import {syncVerifiedStatusTags} from '../app/shopify-status.mjs';
 import {randomUUID} from 'node:crypto';
 export async function runScheduled(app){
+ if(app.env?.SHUTTLE_MIGRATION_STANDBY==='1')return {standby:true};
  const metadata=app.store.schedulerTransaction||app.store.stageTransaction||app.store.transaction;
  const lease=randomUUID();const claimed=await (app.store.schedulerTransaction||app.store.transaction)(s=>{if(s.storageUpgradeUntil>Date.now()||s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
  try{
@@ -34,5 +35,6 @@ export async function runScheduled(app){
 export default async function handler(req,res){
  if(req.method!=='GET'){res.writeHead(405);return res.end();}
  if(!process.env.CRON_SECRET||!secretEquals(req.headers.authorization,'Bearer '+process.env.CRON_SECRET)){res.writeHead(401);return res.end();}
+ if(process.env.SHUTTLE_MIGRATION_STANDBY==='1'){res.writeHead(200,{'Content-Type':'application/json'});return res.end(JSON.stringify({standby:true}));}
  try{const result=await runScheduled(await runtime());res.writeHead(result.ok===false?503:200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(result));}catch{res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Scheduled processing needs attention'}));}
 }

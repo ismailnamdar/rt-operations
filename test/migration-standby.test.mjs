@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createServer} from '../app/server.mjs';import {runScheduled} from '../api/cron.mjs';
+test('migration standby prevents duplicate executors and operational actions without loading private state',async t=>{let writes=0;const app=await createServer({origin:'http://127.0.0.1',allowedOrigins:['http://127.0.0.1'],migrationStandby:true,serverless:true,store:{read:async()=>{throw Error('Private state should not be loaded');},transaction:async()=>{writes++;}}});t.after(()=>app.server.close());
+ async function request(path,method='POST'){const result={},res={setHeader(){},writeHead(status){result.status=status;},end(text){result.body=JSON.parse(text);}};await app.handler({method,url:path,headers:{host:'127.0.0.1'}},res);return result;}
+ for(const path of ['/api/approve','/api/gmail/sync','/api/shopify/import','/api/warehouse/book','/api/workflow/gideon/claim','/api/station/claim']){const r=await request(path);assert.equal(r.status,503);assert.match(r.body.error,/migration standby/);}
+ assert.equal((await request('/health','GET')).body.mode,'migration_standby');assert.deepEqual(await runScheduled({env:{SHUTTLE_MIGRATION_STANDBY:'1'}}),{standby:true});assert.equal(writes,0);
+});
