@@ -1,7 +1,7 @@
 const rank={'awaiting mockup':0,'awaiting approval':1,'awaiting production':2,'in production':3,'cutting / stitching / packing':4,'awaiting carrier':5,'in transit':6,delivered:7,'ready for pickup':6,'picked up':7};
-const scalarKeys=['shopifyTagAccess'];
+const scalarKeys=['shopifyTagAccess','lastScheduledRun','lastLivePrescan'];
 const mapKeys=['orderStages','shopifyOrderBindings','shopifyOrders','stageEvidenceReceipts','shopifyStatusSync','carrierStageEvidence'];
-const baseKeys=['version','revision','settings','shopifyOrderBindings','shopifyOrders','orderStages','productionFacts','stageEvidenceReceipts','carrierStageEvidence','shopifyStatusSync','shopifyTagAccess','shopifyConnection','intents','redoRequests','productionPrescan','shopifyExpeditedScan','stageCorrections'];
+const baseKeys=['version','revision','settings','shopifyOrderBindings','shopifyOrders','orderStages','productionFacts','stageEvidenceReceipts','carrierStageEvidence','shopifyStatusSync','shopifyTagAccess','lastScheduledRun','lastLivePrescan','shopifyConnection','intents','redoRequests','productionPrescan','shopifyExpeditedScan','stageCorrections'];
 const snapshots=['pipeline','unfulfilled','expedited','productionRuns'];
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const time=v=>Date.parse(v||'')||0;
@@ -14,7 +14,7 @@ export function overlayStageState(core,side={}){
   else if(key==='shopifyOrderBindings'){if(!s[key][id])s[key][id]=value;}
   else s[key][id]=value;
  }}
- for(const key of scalarKeys)if(side[key]&&time(side[key].checkedAt)>=time(s[key]?.checkedAt))s[key]=side[key];
+ for(const key of scalarKeys)if(side[key]&&time(side[key].checkedAt||side[key].at)>=time(s[key]?.checkedAt||s[key]?.at))s[key]=side[key];
  if(side.productionFacts){const facts=new Map((s.productionFacts||[]).map(f=>[String(f.order),f]));for(const f of Object.values(side.productionFacts))facts.set(String(f.order),f);s.productionFacts=[...facts.values()];}
  if(side.stageCorrections?.length){const identity=r=>JSON.stringify([r.order,r.at,r.actor,r.to]);const seen=new Set((s.stageCorrections||[]).map(identity));s.stageCorrections=[...(s.stageCorrections||[]),...side.stageCorrections.filter(r=>!seen.has(identity(r)))];}
  if(side.events?.length){const seen=new Set((s.events||[]).map(e=>e.id));s.events=[...(s.events||[]),...side.events.filter(e=>!seen.has(e.id))];}
