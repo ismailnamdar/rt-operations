@@ -42,6 +42,6 @@ export async function stageStore(pool,table){
   if(!same(next,side)){phase='private stage update';next.revision=(side.revision||0)+1;await c.query({text:'UPDATE '+sideTable+' SET payload=$1::jsonb WHERE id=1',values:[JSON.stringify(next)],query_timeout:45000});}
   await c.query('COMMIT');return structuredClone(result);
  }catch(e){e.stagePhase||=phase;try{await c.query('ROLLBACK');}catch{discarded=true;c.release(true);}throw e;}finally{if(!discarded)c.release();}}
- async function withStages(core){return overlayStageState(core,await sideRead());}
+ async function withStages(core){const side=await sideRead(),s=overlayStageState(core,side);Object.defineProperty(s,'stageStorageRevision',{value:side.revision||0,enumerable:false,configurable:true});return s;}
  return {stageRead,stageTransaction,withStages,stageRevision:async core=>{const n=(await sideRead()).revision||0;return n?String(core)+':'+n:String(core);},shopifyAuthRead:async()=>structuredClone((await pool.query("SELECT jsonb_build_object('shopifyOAuth',payload->'shopifyOAuth','shopifyConnection',payload->'shopifyConnection') AS payload FROM "+table+' WHERE id=1')).rows[0].payload)};
 }

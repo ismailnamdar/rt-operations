@@ -153,7 +153,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
   if(url.pathname==='/api/events'&&serverless)return json(res,200,{transport:'poll',intervalMs:15000});
   if(url.pathname==='/api/events'){res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive'});res.write('retry: 3000\ndata: connected\n\n');events.add(res);const timer=setInterval(()=>{if(auth.session.expiresAt<=Date.now()){res.end();return;}res.write(': keepalive\n\n');},25000);req.on('close',()=>{clearInterval(timer);events.delete(res);});return;}
   if(url.pathname==='/api/live'||url.pathname==='/api/state'){
-   const s=await store.read(),original=shuttle2&&user.role==='owner'?await shuttle2.snapshot():null,revision=String(s.revision)+(original?'-'+createHash('sha256').update(JSON.stringify(original)).digest('hex').slice(0,16):'');if(url.searchParams.get('since')===revision)return json(res,200,{revision,unchanged:true});
+   const s=await store.read(),original=shuttle2&&user.role==='owner'?await shuttle2.snapshot():null,revision=String(s.revision)+(s.stageStorageRevision?':'+s.stageStorageRevision:'')+(original?'-'+createHash('sha256').update(JSON.stringify(original)).digest('hex').slice(0,16):'');if(url.searchParams.get('since')===revision)return json(res,200,{revision,unchanged:true});
    if(original?.schedule&&JSON.stringify(s.snapshot.schedule)!==JSON.stringify(original.schedule)){await store.transaction(current=>{current.snapshot.schedule=structuredClone(original.schedule);});s.snapshot.schedule=structuredClone(original.schedule);}
    organizeReviewCategories(s);projectOrderStages(s);
    const emailReady=emailSendingEnabled&&!!gmail?.configured();
