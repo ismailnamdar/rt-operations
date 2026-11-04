@@ -1,3 +1,4 @@
+import {stageStore} from './stage-store.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -23,7 +24,7 @@ export async function createStore({file=process.env.SHUTTLE_DATA_FILE||'data/sta
     let table;try{table=await initializeWorkflowTable(pool,schema);}catch(error){await pool.end().catch(()=>{});throw error;}
     if(partitioned)try{return await partitionedStore(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
     let auth;try{auth=await createAuthSidecar(pool,table);}catch(error){await pool.end().catch(()=>{});throw error;}
-    return {...auth,revision:async()=>String((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
+    return {...auth,...stageStore(pool,table),revision:async()=>String((await pool.query("SELECT payload->>'revision' AS revision FROM "+table+' WHERE id=1')).rows[0].revision),read:async()=>structuredClone((await pool.query('SELECT payload FROM '+table+' WHERE id=1')).rows[0].payload),
       transaction:fn=>workflowTransaction(pool,table,fn),close:()=>pool.end()};
   }
   let tail=Promise.resolve();

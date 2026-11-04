@@ -34,7 +34,7 @@ function recordProductionFact(s,r){const {order,stage}=r; if(OWNERS['SHUTTLE 2.0
 export function applyStageRequest(s,r,user,now=Date.now()){
  requireRole(user,['owner']);if(s.shopifyConnection?.revoked)throw Error('Shopify integration has been revoked');r=validateStageRequest(r,now);const {order,stage}=r;
  s.stageEvidenceReceipts||={};const fingerprint=createHash('sha256').update(JSON.stringify(r)).digest('hex'),old=s.stageEvidenceReceipts[r.requestId];
- if(old){if(old.fingerprint!==fingerprint)throw Error('Request identity reused with different evidence');if(s.orderStages?.[order]?.stage===stage)recordProductionFact(s,r);return {...old,duplicate:true};}
+ if(old){if(old.fingerprint!==fingerprint)throw Error('Request identity reused with different evidence');if(s.orderStages?.[order]?.stage===stage&&!(s.productionFacts||[]).some(f=>String(f.order)===order))recordProductionFact(s,r);return {...old,duplicate:true};}
  const binding=s.shopifyOrderBindings?.[order];if(!binding?.verified||binding.id!==r.shopifyOrderId)throw Error('Current Shopify identity differs from specialist evidence');
  const commerce=s.shopifyOrders?.[order];if(commerce?.cancelledAt)throw Error('Cancelled order requires reconciliation');
  const prior=s.orderStages?.[order];
@@ -64,7 +64,7 @@ async function shippingEvidence(r,commerce,parsel,now){
  const actual=delivered?'delivered':accepted?'in transit':'awaiting carrier';if(actual!==r.stage)throw Error('Live carrier progress differs from proposed stage; refresh the audit');return labels;
 }
 export async function ingestSpecialistStages({store,client,parsel,user,requests,now=Date.now()}){
- requireRole(user,['owner']);if(!client)fail('Shopify is not connected',503);if(!Array.isArray(requests)||!requests.length||requests.length>20)fail('Submit one to twenty specialist requests at a time',400);
+ requireRole(user,['owner']);if(store.stageRead&&store.stageTransaction)store={...store,read:store.stageRead,transaction:store.stageTransaction};if(!client)fail('Shopify is not connected',503);if(!Array.isArray(requests)||!requests.length||requests.length>20)fail('Submit one to twenty specialist requests at a time',400);
  // One token read per bounded batch avoids repeatedly downloading workflow state.
  if(client.accessToken){const token=await client.accessToken();client=Object.assign(Object.create(client),{accessToken:async()=>token});}
  const prepared=[];for(let offset=0;offset<requests.length;offset+=4){prepared.push(...await Promise.all(requests.slice(offset,offset+4).map(async value=>{try{const r=validateStageRequest(value,now),current=(await client.request(ORDER_QUERY,{id:r.shopifyOrderId}))?.order;if(current?.id!==r.shopifyOrderId||String(current.name).replace(/^#/,'')!==r.order)throw Error('Live Shopify order identity mismatch');let labels=null;
