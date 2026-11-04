@@ -1,3 +1,4 @@
+import {ingestSpecialistStages} from './specialist-stages.mjs';
 import {projectOrderStages,syncVerifiedStatusTags} from './shopify-status.mjs';
 import {organizeReviewCategories} from './review-routing.mjs';
 import {authorizeSupabaseStaff} from './supabase-auth.mjs';
@@ -35,7 +36,7 @@ const here=path.dirname(fileURLToPath(import.meta.url));
 export async function createServer({store,provider,origin='http://127.0.0.1:43841',allowedOrigins=[origin],stationToken='',workflowToken='',demo=false,shopify=null,gmail=null,gmailSync=null,parselProbe=null,livePrescan=null,productionClient=null,serverless=false,emailSendingEnabled=false,verifyOrder=null,attachmentRoot=null,setupToken='',ownerEmail='',shopifyImport=null,shopifyRefresh=null,shuttle2=null,drivePreviewDir=null,drive=null,supabaseAuth=null,shopifyOAuth=null,shopifyWebhookSetup=null}={}){
  store||=await createStore();if(demo)await store.transaction(s=>{seedUnreadReviewDemo(s);return true;});provider||=demo?new MockCarrier():new DisabledCarrier();const events=new Set();
  const files=['goat-output-model.js','control-center.js','app.js','orders-modern.js','expedited-urgency.js','index.html','style.css','mockup-batches-ui.js','production-ui.js','production-sheet.js','production-pages.js','production-runs.js','rug-shapes.js','order-detail.js','order-items.js','order-stages.js','demo-sun.svg','demo-wave.svg','demo-leaf.svg','production.css','hosted-ui.js','team-ui.js'];
- files.push('live-state.js','review-routing.js','address-issues-ui.js','gideon-chat.js','prescan-panel.js','startup-guard.js','gideon-gold.svg','login.js');
+ files.push('specialist-stage-import.js','live-state.js','review-routing.js','address-issues-ui.js','gideon-chat.js','prescan-panel.js','startup-guard.js','gideon-gold.svg','login.js');
  const clientVersion=createHash('sha256').update((await Promise.all(files.map(n=>fs.readFile(path.join(here,'public',n))))).join('')).digest('hex').slice(0,16);
  const hosts=new Map(allowedOrigins.map(o=>[new URL(o).host,o]));
  function publish(){for(const res of events)res.write('data: changed\n\n');}
@@ -106,6 +107,7 @@ export async function createServer({store,provider,origin='http://127.0.0.1:4384
    else if(url.pathname==='/api/production/packing-review'){requireRole(user,['owner']);result=prepareLabelBookerPacking(await store.read(),b.runId);}
    else if(url.pathname==='/api/drive/sync'){requireRole(user,['owner']);if(!drive)fail('Read-only Drive authorization is not configured',503);result=await drive.sync(store);}
    else if(url.pathname==='/api/shopify/webhooks/setup'){requireRole(user,['owner']);if(!shopifyWebhookSetup)fail('Webhook registration requires the deployed app and app signing mode',503);result=await shopifyWebhookSetup(user);}
+   else if(url.pathname==='/api/orders/stage-evidence'){result=await ingestSpecialistStages({store,client:productionClient,parsel:livePrescan,user,requests:b.requests});}
    else if(url.pathname==='/api/orders/stage'){requireRole(user,['owner']);result=await store.transaction(s=>assignOrderStage(s,user,b));if(productionClient)result.tagSync=await syncVerifiedStatusTags({store,client:productionClient,orders:[String(b.order)],limit:1});}
    else if(url.pathname==='/api/shopify/status-sync'){requireRole(user,['owner']);if(!productionClient)fail('Shopify is not connected',503);await store.transaction(s=>{s.settings.shopifyTagSyncEnabled=true;});result=await syncVerifiedStatusTags({store,client:productionClient,force:true});}
    else if(url.pathname==='/api/shopify/refresh'){requireRole(user,['owner']);if(!shopifyRefresh)fail('Shopify connection is not configured',503);result=await shopifyRefresh();}
