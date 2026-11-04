@@ -13,3 +13,8 @@ test('tag sync preserves unrelated tags, retries uncertain writes, requires iden
  await store.transaction(s=>{s.shopifyOrderBindings['123'].verified=false;});await syncShopifyStatuses({store,client});assert.equal(writes,prior);
  }finally{await store.close();await fs.rm(dir,{recursive:true,force:true});}
 });
+
+test('pickup stages use independent stage tags and pending redo flags exclude cancelled requests',()=>{const s=blank();s.orderStages={'123':{stage:'ready for pickup'}};s.redoRequests=[{orders:['123'],status:'cancelled'}];assert.deepEqual(desiredStatusTags(s,'123'),['SHUTTLE: Ready for pickup']);s.orderStages['123'].stage='picked up';assert.deepEqual(desiredStatusTags(s,'123'),['SHUTTLE: Picked up']);});
+test('missing write_orders permission prevents mutations and records actionable owner status',async()=>{
+ const {syncVerifiedStatusTags}=await import('../app/shopify-status.mjs');const s=blank();s.orderStages={'123':{stage:'awaiting approval'}};let writes=0;const store={read:async()=>structuredClone(s),transaction:async fn=>fn(s)},client={request:async()=>({currentAppInstallation:{accessScopes:[{handle:'read_orders'}]}}),change:async()=>writes++};const result=await syncVerifiedStatusTags({store,client});assert.equal(result.status,'needs_attention');assert.match(s.shopifyTagAccess.message,/write_orders/);assert.equal(writes,0);
+});

@@ -1,3 +1,3 @@
-export const ORDER_STAGES=['awaiting approval','awaiting mockup','awaiting production','in production','cutting / stitching / packing','awaiting carrier','in transit','delivered'];
-export function normalizeStage(stage){return stage==='awaiting ups'?'awaiting carrier':stage;}
+export const ORDER_STAGES=['awaiting approval','awaiting mockup','awaiting production','in production','cutting / stitching / packing','awaiting carrier','in transit','delivered','ready for pickup','picked up'];
+export function normalizeStage(stage){stage=String(stage||'').trim().toLowerCase();if(stage==='awaiting ups')return 'awaiting carrier';if(['cutting','stitching','packing'].includes(stage))return 'cutting / stitching / packing';if(stage==='in queue for production')return 'awaiting production';return stage;}
 export function stageLabel(stage){stage=normalizeStage(stage);if(['cutting','stitching','packing'].includes(stage))stage='cutting / stitching / packing';if(stage==='in queue for production')stage='awaiting production';return ORDER_STAGES.includes(stage)?stage[0].toUpperCase()+stage.slice(1):'Stage not recorded';}

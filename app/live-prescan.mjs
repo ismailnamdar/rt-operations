@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {fingerprint,fail,record} from './shipping.mjs';
 import {requireRole} from './auth.mjs';
 import {prepareEarlyPrescan,artworkFingerprint} from './early-prescan.mjs';
-import {stageAfterBooking} from './stage-automation.mjs';
+import {stageAfterBooking,advanceCarrierStages} from './stage-automation.mjs';
 import {fulfillmentPlan,saveFulfillment} from './prescan-fulfillment.mjs';
 
 export const PRESCAN_ORDER_QUERY=`query PrescanOrder($id: ID!){order(id:$id){id name email updatedAt cancelledAt displayFinancialStatus displayFulfillmentStatus requiresShipping tags shippingAddress{name company address1 address2 city provinceCode zip countryCodeV2 phone} shippingLines(first:100){nodes{title code isRemoved currentDiscountedPriceSet{shopMoney{amount currencyCode}}}pageInfo{hasNextPage}} fulfillments(first:100){id status trackingInfo{number company}}}}`;
@@ -66,7 +66,7 @@ export class LivePrescan{
   state=await this.store.read();const h=state.parselHistory,pending=[...new Set(Object.values(h.labels).map(l=>l.shipmentId))].filter(id=>!h.shipments[id]).slice(0,limit);
   // Small concurrent groups avoid one HTTP call per label on every later prescan.
   const stopAt=this.now()+20000;for(let at=0;at<pending.length&&this.now()<stopAt-8000;at+=4)await Promise.all(pending.slice(at,at+4).map(async id=>{const ship=(await this.api('/shipments/'+encodeURIComponent(id))).data;if(ship?.id!==id)throw Error('Shipment identity mismatch');await this.store.transaction(s=>{s.parselHistory.shipments[id]={id,order:orderRef(ship.custom_reference_1),destination:ship.destination,parcel:ship.parcel,labelId:ship.shipping_label?.id,origin:ship.origin,returnAddress:ship.return_address};if(!s.prescanSender&&completeAddress(ship.origin)&&/^\+?1?949/.test(String(ship.origin.phone||'').replace(/\D/g,'')))s.prescanSender=suppliedAddress(ship.origin);});}));
-  await this.store.transaction(s=>{const h=s.parselHistory;h.complete=h.listingComplete&&Object.values(h.labels).every(l=>h.shipments[l.shipmentId]);});
+  await this.store.transaction(s=>{const h=s.parselHistory;h.complete=h.listingComplete&&Object.values(h.labels).every(l=>h.shipments[l.shipmentId]);advanceCarrierStages(s,this.now());});
  }
  async commerce(order){const s=await this.store.read(),id=s.shopifyOrderBindings?.[order]?.id;if(!id||s.shopifyConnection?.revoked)throw Error('Current Shopify order binding is unavailable');const value=(await this.client.request(PRESCAN_ORDER_QUERY,{id}))?.order;if(value?.id!==id||String(value.name).replace(/^#/,'')!==order)throw Error('Shopify order identity does not match');if(!value.shippingLines||value.shippingLines.pageInfo.hasNextPage||!Array.isArray(value.fulfillments)||value.fulfillments.length>=100)throw Error('Shopify shipping/fulfillment coverage is incomplete');return value;}
  async inspect(job){
