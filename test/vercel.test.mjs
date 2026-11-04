@@ -21,3 +21,8 @@ test('serverless runtime uses Supabase login, blocks legacy setup and preserves 
  assert.equal((await send('/api/team/invite',{email:'bad@example.invalid'},{Cookie:cookie})).status,403);
  assert.equal((await fetch(base+'/.env',{headers:{Cookie:cookie}})).status,404);
 });
+
+test('hosted startup verifies the Shopify store without downloading the mailbox payload',async()=>{
+ let reads=0;const store={read:async()=>{throw Error('Full mailbox must not be read during startup');},shopifyAuthRead:async()=>{reads++;return {shopifyConnection:{shop:'47d43a.myshopify.com'}};}};
+ const app=await createVercelRuntime({store,client:{request:async()=>{throw Error('No provider call expected');}},env:{...env,SHOPIFY_STORE:'47d43a.myshopify.com',SUPABASE_URL:'https://fixture.supabase.co',SUPABASE_PUBLISHABLE_KEY:'public-test-key'}});assert.equal(typeof app.handler,'function');assert.equal(reads,1);
+});
