@@ -17,7 +17,7 @@ export class ShopifyStatusClient{
 }
 // One durable lease per order; retries reconcile current remote tags after uncertain responses.
 export async function syncShopifyStatuses({store,client,limit=20,deadline=Infinity,orders=null}){
- const snapshot=await store.read();let count=0;
+ if(store.stageRead&&store.stageTransaction)store={...store,read:store.stageRead,transaction:store.stageTransaction};const snapshot=await store.read();let count=0;
  for(const order of Object.keys(snapshot.orderStages||{}).filter(order=>!orders||orders.map(String).includes(order)).sort((a,b)=>String(snapshot.shopifyStatusSync?.[a]?.verifiedAt||'').localeCompare(String(snapshot.shopifyStatusSync?.[b]?.verifiedAt||'')))){
   if(count>=limit||Date.now()>=deadline)break;
   const lease=randomUUID();
@@ -44,7 +44,7 @@ export async function syncShopifyStatuses({store,client,limit=20,deadline=Infini
 }
 
 export async function syncVerifiedStatusTags({store,client,limit=20,orders=null,force=false}){
- const s=await store.read();if(!client||s.shopifyConnection?.revoked)return {status:'disconnected'};
+ if(store.stageRead&&store.stageTransaction)store={...store,read:store.stageRead,transaction:store.stageTransaction};const s=await store.read();if(!client||s.shopifyConnection?.revoked)return {status:'disconnected'};
  let access=s.shopifyTagAccess;
  if(force||!access||Date.now()-Date.parse(access.checkedAt)>600000){
   try{const scopes=(await client.request(FULFILLMENT_ACCESS_QUERY,{}))?.currentAppInstallation?.accessScopes?.map(x=>x.handle)||[];access={allowed:scopes.includes('write_orders'),checkedAt:new Date().toISOString(),status:scopes.includes('write_orders')?'ready':'needs_permission',message:scopes.includes('write_orders')?'Order-tag write permission verified.':'Shopify needs write_orders permission and app reauthorization to update status tags.'};}

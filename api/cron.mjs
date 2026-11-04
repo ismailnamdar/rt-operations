@@ -14,7 +14,7 @@ export async function runScheduled(app){
  const lease=randomUUID();const claimed=await app.store.transaction(s=>{if(s.scheduledLease?.until>Date.now())return false;s.scheduledLease={id:lease,until:Date.now()+150000};return true;});if(!claimed)return {busy:true};
  try{
   const current=await app.store.read(),tasks=[];
-  tasks.push(['stages',async()=>{if(current.productionFacts?.length)await app.store.transaction(s=>{advanceProductionStages(s);});}]);
+  tasks.push(['stages',async()=>{if(current.productionFacts?.length)await (app.store.stageTransaction||app.store.transaction)(s=>{advanceProductionStages(s);});}]);
   if(app.gmail?.configured()&&app.env.GMAIL_PUSH_TOPIC)tasks.push(['gmailWatch',()=>ensureGmailWatch({store:app.store,gmail:app.gmail,topic:app.env.GMAIL_PUSH_TOPIC})]);
   if(app.gmail?.configured())tasks.push(['gmail',()=>syncGmail({store:app.store,gmail:app.gmail,labelSync:app.env.GMAIL_LABEL_SYNC==='1'})]);
   if(app.drive)tasks.push(['drive',async()=>{const redo=(current.redoRequests||[]).find(r=>r.status!=='resolved'&&!r.fileReturn?.verified);if(redo&&app.drive.writeEnabled)await processDriveRedo({store:app.store,drive:app.drive,id:redo.id});if(!current.snapshot.driveProduction?.checkedAt||Date.now()-Date.parse(current.driveFullInventoryAt||current.snapshot.driveProduction.checkedAt)>300000)await app.drive.sync(app.store);else if(app.drive.syncIntake)await app.drive.syncIntake(app.store);}]);
