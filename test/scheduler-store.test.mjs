@@ -11,3 +11,9 @@ test('scheduler metadata never rewrites core, honors old leases, skips no-ops an
  await store.schedulerTransaction(s=>{delete s.scheduledLease;s.lastScheduledRun={at:'2026-11-04T20:00:00Z',status:'complete'};});const s=await store.withScheduler(structuredClone(core));assert.equal(s.lastScheduledRun.status,'complete');await store.schedulerTransaction(s=>{s.lastScheduledRun.at='2026-11-04T21:00:00Z';s.driveFullInventoryAt='2026-11-04T21:00:00Z';});assert.equal(await store.schedulerRevision(),1);assert.equal(s.schedulerStorageRevision,1);assert.equal(Object.keys(s).includes('schedulerStorageRevision'),false);
  assert.deepEqual((await db.query('SELECT payload FROM shuttle_state')).rows[0].payload,core);assert.ok(!calls.some(q=>/^UPDATE shuttle_state SET/.test(q)));assert.equal((await db.query("SELECT relrowsecurity FROM pg_class WHERE relname='shuttle_state_scheduler'")).rows[0].relrowsecurity,true);await db.close();
 });
+
+test('integration health uses the small projection instead of loading mailbox bodies',async()=>{
+ const {checkIntegrations}=await import('../app/integration-readiness.mjs');let read=0;
+ const report=await checkIntegrations({store:{read:async()=>{throw Error('Full mailbox read prohibited');},integrationRead:async()=>{read++;return {gmailSync:{pending:{a:{error:'retry',providerStatus:429}}},driveFullInventoryAt:'2026-11-04T20:00:00Z'};}},user:{role:'owner'}});
+ assert.equal(read,1);assert.equal(report.checks.gmail.pending,1);assert.equal(report.checks.drive.lastSuccessAt,'2026-11-04T20:00:00Z');assert.equal(report.writesPerformed,false);
+});
