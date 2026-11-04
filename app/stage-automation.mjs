@@ -23,9 +23,9 @@ export function advanceCarrierStages(s,now=Date.now()){
   const packages=(s.intents||[]).filter(i=>i.approved.orders.map(String).includes(order));
   if(!packages.length||packages.some(i=>!i.booking||i.redoHold||i.sourceChangedHold||i.status==='held')||(s.redoRequests||[]).some(r=>!['resolved','cancelled'].includes(r.status)&&r.orders.map(String).includes(order)))continue;
   const labels=packages.map(i=>s.parselHistory.labels?.[i.booking.id]);
-  if(labels.some((l,n)=>!l||/VOID|CANCEL|REFUND|FAIL/i.test(l.status||'')||l.tracking!==packages[n].booking.tracking))continue;
+  if(labels.some((l,n)=>!l||/VOID|CANCEL|REFUND|FAIL|RETURN|EXCEPTION/i.test(l.status||'')||l.tracking!==packages[n].booking.tracking))continue;
   const verified=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&Date.parse(value)<=now;
-  if(labels.every(l=>verified(l.deliveredAt)))automatedStage(s,order,'delivered','all_packages_delivered',new Date(now).toISOString());
-  else if(labels.every(l=>verified(l.firstScanAt)||verified(l.deliveredAt)))automatedStage(s,order,'in transit','all_packages_carrier_accepted',new Date(now).toISOString());
+  if(labels.every(l=>l.status==='DELIVERED'||verified(l.deliveredAt)))automatedStage(s,order,'delivered','all_packages_delivered',new Date(now).toISOString());
+  else if(labels.every(l=>['IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED'].includes(l.status)||verified(l.firstScanAt)||verified(l.deliveredAt)))automatedStage(s,order,'in transit','all_packages_carrier_accepted',new Date(now).toISOString());
  }
 }

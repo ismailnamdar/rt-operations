@@ -5,3 +5,9 @@ test('unverified artwork never releases an order; redo retains production and re
 test('carrier stage requires every exact package scan, fresh coverage, and no active redo',async()=>{
  const {advanceCarrierStages}=await import('../app/stage-automation.mjs');const at=new Date().toISOString(),s={events:[],orderStages:{'1':{stage:'awaiting carrier'}},intents:[{approved:{orders:['1']},booking:{id:'a',tracking:'A'}},{approved:{orders:['1']},booking:{id:'b',tracking:'B'}}],parselHistory:{complete:true,checkedAt:at,labels:{a:{tracking:'A',firstScanAt:at},b:{tracking:'B'}}}};advanceCarrierStages(s);assert.equal(s.orderStages['1'].stage,'awaiting carrier');s.parselHistory.labels.b.firstScanAt=at;advanceCarrierStages(s);assert.equal(s.orderStages['1'].stage,'in transit');s.parselHistory.labels.a.deliveredAt=at;advanceCarrierStages(s);assert.equal(s.orderStages['1'].stage,'in transit');s.parselHistory.labels.b.deliveredAt=at;s.redoRequests=[{orders:['1'],status:'queued'}];advanceCarrierStages(s);assert.equal(s.orderStages['1'].stage,'in transit');s.redoRequests[0].status='resolved';advanceCarrierStages(s);assert.equal(s.orderStages['1'].stage,'delivered');
 });
+
+test('fresh explicit Parsel progress is accepted when optional scan timestamps are absent',async()=>{
+ const {advanceCarrierStages}=await import('../app/stage-automation.mjs');
+ const now=Date.now(),s={events:[],intents:[{approved:{orders:['999']},booking:{id:'label',tracking:'exact'}}],parselHistory:{complete:true,checkedAt:new Date(now).toISOString(),labels:{label:{tracking:'exact',status:'IN_TRANSIT',firstScanAt:null,deliveredAt:null}}}};
+ advanceCarrierStages(s,now);assert.equal(s.orderStages['999'].stage,'in transit');s.parselHistory.labels.label.status='DELIVERED';advanceCarrierStages(s,now);assert.equal(s.orderStages['999'].stage,'delivered');
+});
